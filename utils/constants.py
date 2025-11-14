@@ -1,0 +1,42 @@
+"""
+定数定義モジュール
+Untitled.py の68行目～103行目から抽出
+"""
+
+class Constants:
+    """アプリケーション定数"""
+    
+    # メッキ関連
+    MEKKI_SUPPLIER_CD = 116
+    MEKKI_PATTERNS = [
+        r'/Ni-P', r'/NiCr', r'／Ni-P', r'／NiCr',
+        r'Ｎｉ－Ｐ', r'Ｃｒ', r'ＮｉＣｒ' 
+    ]
+    MEKKI_ALERT_TEXT = '⚠️メッキ出'
+    
+    # 手配区分CD
+    ORDER_TYPE_BLANK = '13'  # 加工用ブランク
+    ORDER_TYPE_PROCESSED = '11'  # 追加工
+    ORDER_TYPE_STOCK = '15'  # 在庫部品
+    
+    # Excel出力
+    EXCEL_COLUMNS = ['納期', '仕入先略称', '発注番号', '手配数', '単位', '品名', 
+                     '仕様１', '仕様２', '手配区分', 'メーカー', '備考']
+    COLUMN_WIDTHS = {
+        'A': 10, 'B': 12, 'C': 10, 'D': 6, 'E': 6, 'F': 25,
+        'G': 20, 'H': 15, 'I': 12, 'J': 10, 'K': 15
+    }
+    
+    # 色設定
+    COLOR_GRAY = "DADADA"
+    COLOR_WHITE = "FFFFFF"
+    COLOR_ACCEPT_LIGHT = "FEC0D7"  # 薄いピンク
+    COLOR_ACCEPT_DARK = "FFABC9"   # 濃いピンク
+    COLOR_RED = "FF0000"
+    COLOR_HEADER = "4F4F4F"
+    COLOR_CHILD = "F0F0F0"
+    
+    # ステータス
+    STATUS_BEFORE = '受入準備前'
+    STATUS_IN_PROGRESS = '納品中'
+    STATUS_COMPLETED = '納品完了'

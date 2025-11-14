@@ -1,0 +1,2377 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手配発注マージシステム</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <!-- QRコードスキャナーライブラリ -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
+    <!-- バーコードスキャナーライブラリ（QuaggaJS） -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
+    <!-- 🔥 Chart.js追加 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@2.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.2.1/dist/chartjs-plugin-annotation.min.js"></script>
+    <!-- 🔥 スクリプトを追加 -->
+    <script src="/static/gantt-chart.js"></script>
+    <script src="/static/qr-scanner.js"></script>
+    <script src="/static/pallet-manager.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>手配発注マージシステム</h1>
+            <p>Excel処理・入荷管理・ステータス追跡</p>
+        </div>
+
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="switchTab('orders')">📋 受注リスト</button>
+            <button class="nav-tab" onclick="switchTab('upload')">📤 データ処理</button>
+            <button class="nav-tab" onclick="switchTab('receiving')">📦 入荷管理</button>
+            <button class="nav-tab" onclick="switchTab('pallets')">🏢 ユニット保管場所</button>
+            <button class="nav-tab" onclick="switchTab('archive')">🗄️ アーカイブ</button>
+            <button class="nav-tab" onclick="switchTab('history')">📊 発行履歴</button>
+        </div>
+        
+        <div class="content">
+            <!-- 受注リストタブ -->
+            <div id="orders-tab" class="tab-content active">
+                <h2>受注リスト</h2>
+
+                <!-- 🔥 ガントチャート追加 -->
+                <div style="background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3>📊 納期ガントチャート</h3>
+                        <button class="btn btn-info btn-sm" onclick="toggleGanttChart()">
+                            <span id="ganttToggleIcon">📉</span> <span id="ganttToggleText">非表示</span>
+                        </button>
+                    </div>
+                    
+                    <!-- 🔥 製番フィルタUI -->
+                    <div id="ganttFilterContainer" style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                            <strong>🔍 製番フィルタ:</strong>
+                            <button class="btn btn-sm btn-primary" onclick="selectAllSeibansForGantt()">全て選択</button>
+                            <button class="btn btn-sm btn-secondary" onclick="deselectAllSeibansForGantt()">全て解除</button>
+                            <button class="btn btn-sm btn-success" onclick="applyGanttFilter()">フィルタ適用</button>
+                            <span id="ganttFilterCount" style="color: #6c757d; margin-left: auto;"></span>
+                        </div>
+                        <div id="ganttSeibanList" style="max-height: 150px; overflow-y: auto; padding: 10px; background: white; border: 1px solid #dee2e6; border-radius: 5px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 5px;">
+                            <!-- 動的に生成 -->
+                        </div>
+                    </div>
+                    
+                    <!-- ガントチャート用ローディング表示 -->
+                    <div id="ganttLoadingOverlay" style="display: none; background: rgba(255, 255, 255, 0.95); position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 1000; border-radius: 10px;">
+                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; padding: 20px;">
+                            <div class="spinner" style="width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
+                            <div id="ganttLoadingMessage" style="font-size: 1.2em; font-weight: bold; color: #667eea; margin-bottom: 15px;">
+                                ガントチャートを読み込み中...
+                            </div>
+                            <div style="width: 80%; max-width: 400px; background: #e9ecef; border-radius: 20px; overflow: hidden; height: 30px; margin-bottom: 10px;">
+                                <div id="ganttLoadingBar" style="height: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); width: 0%; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center;">
+                                    <span id="ganttLoadingPercent" style="color: white; font-weight: bold; font-size: 0.9em;"></span>
+                                </div>
+                            </div>
+                            <div id="ganttLoadingDetail" style="font-size: 0.9em; color: #6c757d; text-align: center;">
+                                準備中...
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="ganttChartContainer" style="position: relative; height: 400px; overflow-y: auto;">
+                        <canvas id="ganttChart"></canvas>
+                    </div>
+                </div>
+                                
+                <div class="form-group">
+                    <input type="text" id="searchInput" placeholder="製番で検索..." onkeyup="filterOrders()">
+                    <button class="btn btn-danger" id="deleteMultipleBtn" style="margin-top: 10px;">選択した製番を一括削除</button>
+                </div>
+                <div id="orderGrid" class="order-grid"></div>
+            </div>
+
+        
+            <!-- データ処理タブ -->
+            <div id="upload-tab" class="tab-content">
+                <!-- システムステータス表示 -->
+                <div id="systemStatus" class="alert alert-info" style="display: none;">
+                    <h4>📊 システムステータス</h4>
+                    <p id="statusMessage"></p>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="statusProgress" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- ネットワークファイル読み込みセクション -->
+                <div class="upload-section" style="background: #e8f4f8;">
+                    <h2>🌐 ネットワークファイル自動読み込み</h2>
+                    <p>既定のファイル: \\server3\Share-data\Document\仕入れ\002_手配リスト\手配発注_ALL.xlsx</p>
+                    <button class="btn btn-primary" onclick="loadNetworkFile()">
+                        ネットワークファイル再読込
+                    </button>
+                    <button class="btn btn-warning" onclick="refreshExcelFile()" style="margin-left: 10px;">
+                        📊 Excel更新
+                    </button>
+                    <button class="btn btn-warning" onclick="runRefreshScript()" style="margin-left: 10px;">
+                        🔄 更新スクリプト実行
+                    </button>
+                    <button class="btn btn-warning" onclick="loadFromODBC()" style="margin-left: 10px;">
+                        ODBCから直接読み込む
+                    </button>
+                    <button class="btn btn-info" onclick="debugPaths()" style="margin-left: 10px;">
+                        🔍 接続診断
+                    </button>
+                    <div id="networkFileInfo" style="margin-top: 10px;"></div>
+                </div>
+
+                    <!-- 発注日フィルタ追加 -->
+                    <div class="form-group" style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                        <label style="margin-bottom: 10px; display: block; cursor: pointer;">
+                            <input type="checkbox" id="enableOrderDateFilter" onchange="toggleOrderDateFilter()" 
+                                style="width: 20px; height: 20px; margin-right: 8px; vertical-align: middle; cursor: pointer;">
+                            <strong style="vertical-align: middle; font-size: 1.1em;">📅 発注日でフィルタリング（期間指定）</strong>
+                        </label>
+                        <div id="orderDateFilterInput" style="display: none; margin-top: 10px;">
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <div style="flex: 1;">
+                                    <label>開始日（この日付以降）:</label>
+                                    <input type="date" id="orderDateFrom" style="width: 100%; padding: 8px;">
+                                </div>
+                                <div style="padding-top: 20px;">〜</div>
+                                <div style="flex: 1;">
+                                    <label>終了日（この日付まで）:</label>
+                                    <input type="date" id="orderDateTo" style="width: 100%; padding: 8px;">
+                                </div>
+                            </div>
+                            <small style="color: #856404; display: block; margin-top: 5px;">
+                                💡 指定期間内に発注されたデータのみマージされます（終了日を空欄にすると開始日以降すべて）
+                            </small>
+                        </div>
+                    </div>
+                    <!-- 処理モード選択 -->
+                    <div class="form-group">
+                        <label>処理モード:</label>
+                        <select id="processingMode" onchange="toggleProcessingMode()">
+                            <option value="single">単一製番処理</option>
+                            <option value="auto">自動検出・一括処理</option>
+                        </select>
+                    </div>
+                    
+                    <!-- 単一製番入力 -->
+                    <div id="singleModeInput">
+                        <div class="form-group">
+                            <label>製番 (例: MHT0123):</label>
+                            <input type="text" id="seibanInput" placeholder="MHT0123">
+                        </div>
+                        <button class="btn btn-primary" onclick="processFile()">処理開始</button>
+                    </div>
+                    
+                    <!-- 自動検出モード -->
+                    <div id="autoModeInput" style="display: none;">
+                        <div class="form-group">
+                            <label>最小製番 (この番号以降を処理):</label>
+                            <input type="text" id="minSeibanInput" placeholder="MHT0600" value="MHT0600">
+                        </div>
+                        <button class="btn btn-primary" onclick="detectAndProcess()">製番を検出</button>
+                        
+                        <div id="detectedSeibans" style="margin-top: 20px; display: none;">
+                            <h4>検出された製番</h4>
+                            <div id="seibanList" style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                            </div>
+                            <div style="margin-top: 10px;">
+                                <button class="btn btn-success" onclick="processSelectedSeibans()">選択した製番を処理</button>
+                                <button class="btn btn-primary" onclick="selectAllSeibans()">全て選択</button>
+                                <button class="btn btn-secondary" onclick="deselectAllSeibans()">全て解除</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 処理進捗 -->
+                    <div id="batchProgress" style="display: none; margin-top: 20px;">
+                        <h4>処理進捗</h4>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="batchProgressBar" style="width: 0%"></div>
+                        </div>
+                        <p id="batchProgressText">0 / 0 完了</p>
+                        <div id="batchResults" style="max-height: 200px; overflow-y: auto; margin-top: 10px;">
+                        </div>
+                    </div>
+
+                    <!-- シート選択 -->
+                    <div class="form-group">
+                        <label>手配リストのシート:</label>
+                        <select id="sheet1Select"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>発注リストのシート:</label>
+                        <select id="sheet2Select"></select>
+                    </div>
+
+                    <div id="sheetSelection" style="display: none;">
+                        <h3>シート選択</h3>
+
+                    </div>
+
+                    <div class="loading" id="loadingIndicator">
+                        <div class="spinner"></div>
+                        <p>処理中...</p>
+                    </div>
+
+                    <!-- 手動アップロードセクション -->
+                    <div class="upload-section">
+                        <h2>📤 手動ファイルアップロード</h2>
+                        <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+                            <div id="uploadText">
+                                <p style="font-size: 3em;">📁</p>
+                                <p>クリックまたはドラッグ＆ドロップでファイルを選択</p>
+                                <p style="color: #6c757d; font-size: 0.9em;">対応形式: .xlsx, .xls (最大50MB)</p>
+                            </div>
+                        </div>
+                        <input type="file" id="fileInput" accept=".xlsx,.xls" style="display: none;">
+                    </div>
+
+            </div>
+
+            <!-- 入荷管理タブ -->
+            <div id="receiving-tab" class="tab-content">
+                <h2>📦 入荷管理</h2>
+                
+                <!-- 発注番号での検索・受入 -->
+                <div class="card" style="margin-bottom: 20px; padding: 20px; background: #f8f9fa; border-radius: 10px;">
+                    <h3>🔍 発注番号で検索・受入</h3>
+                    <div class="form-group">
+                        <label>発注番号を入力（QRコードスキャンも可能）:</label>
+                        <div style="display: flex; gap: 5px;">
+                            <input type="text" id="purchaseOrderInput" placeholder="例: 85858 または QRスキャン後Enter" style="flex: 1;">
+                            <button class="btn btn-primary" onclick="searchByPurchaseOrder()">検索</button>
+                            <button class="btn btn-success" onclick="receiveByPurchaseOrder()"title="検索結果の内容を受入">検索結果受入</button>
+                            <button class="btn btn-warning" onclick="startQRScanner()" title="カメラでQRコード読取">📷 QRスキャン</button>
+                        </div>
+                        <small style="color: #6c757d; display: block; margin-top: 5px;">
+                            💡 QRコードリーダーでスキャンした後、Enterキーを押すと自動的に処理されます
+                        </small>
+                    </div>
+                    <div id="purchaseOrderSearchResult"></div>
+                </div>
+
+                <!-- QRコードスキャナーモーダル -->
+                <div id="qrScannerModal" class="modal">
+                    <div class="modal-content" style="max-width: 600px;">
+                        <div class="modal-header">
+                            <h2>📷 QRコードスキャン</h2>
+                            <button onclick="stopQRScanner()" style="background: none; border: none; color: white; font-size: 1.5em; cursor: pointer;">×</button>
+                        </div>
+                        <div class="modal-body" style="text-align: center;">
+                            <video id="qrVideo" style="width: 100%; max-width: 500px; border-radius: 10px;"></video>
+                            <canvas id="qrCanvas" style="display: none;"></canvas>
+                            <div id="qrResult" style="margin-top: 20px; font-size: 1.2em; color: #28a745;"></div>
+                            <p style="margin-top: 10px; color: #6c757d;">
+                                QRコードをカメラに向けてください
+                            </p>
+                            <button class="btn btn-danger" onclick="stopQRScanner()" style="margin-top: 20px;">
+                                キャンセル
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 仕様１での検索 -->
+                <div class="card" style="margin-bottom: 20px; padding: 20px; background: #e8f4ff; border-radius: 10px;">
+                    <h3>🔍 仕様１（型番）で検索</h3>
+                    <div class="form-group">
+                        <label>仕様１を入力:</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="text" id="spec1Input" placeholder="例: MVBLK-SSM-3RP-GDKZG" style="flex: 1;">
+                            <button class="btn btn-primary" onclick="searchBySpec1()">検索</button>
+                        </div>
+                    </div>
+                    <div id="spec1SearchResult"></div>
+                </div>
+                
+                <!-- 発注番号統計 -->
+                <div class="card" style="margin-bottom: 20px; padding: 20px; background: #e8f4f8; border-radius: 10px;">
+                    <h3>📊 発注番号別進捗</h3>
+                    <button class="btn btn-primary" onclick="loadPurchaseOrderStats()">統計を更新</button>
+                    <div id="purchaseOrderStats" style="margin-top: 20px;"></div>
+                </div>
+                
+                <!-- 既存の受入リスト -->
+                <div class="card" style="padding: 20px; background: white; border: 1px solid #dee2e6; border-radius: 10px;">
+                    <h3>📋 製番別受入リスト</h3>
+                    <div id="receivingList"></div>
+                </div>
+            </div>
+
+            <script>
+
+
+            let detectedSeibansList = [];
+
+            function toggleProcessingMode() {
+                const mode = document.getElementById('processingMode').value;
+                
+                if (mode === 'single') {
+                    document.getElementById('singleModeInput').style.display = 'block';
+                    document.getElementById('autoModeInput').style.display = 'none';
+                    document.getElementById('detectedSeibans').style.display = 'none';
+                } else {
+                    document.getElementById('singleModeInput').style.display = 'none';
+                    document.getElementById('autoModeInput').style.display = 'block';
+                }
+            }
+
+            async function detectAndProcess() {
+                const sheet1 = document.getElementById('sheet1Select').value;
+                const minSeiban = document.getElementById('minSeibanInput').value || 'MHT0600';
+                
+                document.getElementById('loadingIndicator').style.display = 'block';
+                
+                try {
+                    const response = await fetch('/api/detect-seibans', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            filepath: currentFilePath,
+                            sheet_name: sheet1,
+                            min_seiban: minSeiban
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        detectedSeibansList = data.seibans;
+                        displayDetectedSeibans(data.seibans);
+                        showToast(`${data.count}件の製番を検出しました`, 'success');
+                    } else {
+                        showToast('エラー: ' + data.error, 'error');
+                    }
+                } catch (error) {
+                    showToast('検出エラー: ' + error, 'error');
+                } finally {
+                    document.getElementById('loadingIndicator').style.display = 'none';
+                }
+            }
+
+            function displayDetectedSeibans(seibans) {
+                const listDiv = document.getElementById('seibanList');
+                listDiv.innerHTML = '';
+                
+                seibans.forEach(seiban => {
+                    const checkbox = document.createElement('div');
+                    checkbox.style.marginBottom = '5px';
+                    checkbox.innerHTML = `
+                        <label style="cursor: pointer;">
+                            <input type="checkbox" class="seiban-checkbox" value="${seiban}" checked>
+                            <strong>${seiban}</strong>
+                        </label>
+                    `;
+                    listDiv.appendChild(checkbox);
+                });
+                
+                document.getElementById('detectedSeibans').style.display = 'block';
+            }
+
+            function selectAllSeibans() {
+                document.querySelectorAll('.seiban-checkbox').forEach(cb => cb.checked = true);
+            }
+
+            function deselectAllSeibans() {
+                document.querySelectorAll('.seiban-checkbox').forEach(cb => cb.checked = false);
+            }
+
+            async function processSelectedSeibans() {
+                const selectedSeibans = Array.from(document.querySelectorAll('.seiban-checkbox:checked'))
+                    .map(cb => cb.value);
+                
+                if (selectedSeibans.length === 0) {
+                    showToast('製番を選択してください', 'warning');
+                    return;
+                }
+                
+                if (!confirm(`${selectedSeibans.length}件の製番を処理します。よろしいですか？`)) {
+                    return;
+                }
+                
+                const sheet1 = document.getElementById('sheet1Select').value;
+                const sheet2 = document.getElementById('sheet2Select').value;
+                
+                // 進捗表示を初期化
+                const progressDiv = document.getElementById('batchProgress');
+                const progressBar = document.getElementById('batchProgressBar');
+                const progressText = document.getElementById('batchProgressText');
+                const resultsDiv = document.getElementById('batchResults');
+                
+                progressDiv.style.display = 'block';
+                resultsDiv.innerHTML = '';
+                
+                let completed = 0;
+                
+                for (const seiban of selectedSeibans) {
+                    try {
+                        const response = await fetch('/api/process', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                filepath: currentFilePath,
+                                sheet1: sheet1,
+                                sheet2: sheet2,
+                                seiban: seiban
+                            })
+                        });
+                        
+                        const data = await response.json();
+                        
+                        completed++;
+                        const progress = (completed / selectedSeibans.length * 100);
+                        progressBar.style.width = progress + '%';
+                        progressText.textContent = `${completed} / ${selectedSeibans.length} 完了`;
+                        
+                        if (data.success) {
+                            resultsDiv.innerHTML += `<div style="color: green;">✅ ${seiban}: 処理完了</div>`;
+                        } else {
+                            resultsDiv.innerHTML += `<div style="color: red;">❌ ${seiban}: ${data.error}</div>`;
+                        }
+                    } catch (error) {
+                        resultsDiv.innerHTML += `<div style="color: red;">❌ ${seiban}: ${error}</div>`;
+                    }
+                }
+                
+                showToast(`一括処理完了: ${completed}件`, 'success');
+                loadOrders();
+                
+                // フォームをリセット
+                setTimeout(() => {
+                    document.getElementById('sheetSelection').style.display = 'none';
+                    document.getElementById('uploadText').innerHTML = `
+                        <p style="font-size: 3em;">📁</p>
+                        <p>クリックまたはドラッグ&ドロップでファイルを選択</p>
+                        <p style="color: #6c757d; font-size: 0.9em;">対応形式: .xlsx, .xls (最大50MB)</p>
+                    `;
+                }, 3000);
+            }
+            
+            // 発注番号で検索
+            async function searchByPurchaseOrder() {
+                const purchaseOrderNumber = document.getElementById('purchaseOrderInput').value.trim();
+                
+                if (!purchaseOrderNumber) {
+                    showToast('発注番号を入力してください', 'warning');
+                    return;
+                }
+                
+                // 浮動小数点形式を整数形式に変換
+                let searchNumber = purchaseOrderNumber;
+                if (searchNumber.includes('.0')) {
+                    searchNumber = searchNumber.replace('.0', '');
+                }
+                
+                // 🔥 ゼロパディングを削除
+                searchNumber = String(parseInt(searchNumber));
+                
+                try {
+                    // 🔥 検索開始トースト
+                    showToast('1.マージされたデータから検索中...', 'info', 2000);
+                    
+                    const response = await fetch(`/api/search-by-purchase-order/${searchNumber}`);
+                    const data = await response.json();
+
+                    if (data.cache_needs_loading) {
+                        showToast('2.マージされたデータの中から発注番号を見つけられませんでした。発注リストデータベースより検索します（時間がかかります）', 'warning', 5000);
+                       await new Promise(resolve => setTimeout(resolve, 500));
+                    }
+                    
+                    const resultDiv = document.getElementById('purchaseOrderSearchResult');
+                    
+                    if (data.found) {
+
+                        // 未マージデータの警告
+                        let warningHtml = '';
+                        if (data.has_unmerged) {
+                            warningHtml = `
+                                <div class="alert alert-warning" style="margin-bottom: 10px;">
+                                    ⚠️ 未マージデータが含まれています（発注_ALLシートから取得）<br>
+                                    <small>※これらのデータは受入処理できません。マージ処理を実行してください。</small>
+                                </div>
+                            `;
+                        }
+                        
+                        let html = `
+                            ${warningHtml}
+                            <div class="alert alert-success">
+                                <h4>検索結果: ${data.count}件</h4>
+                                <div class="table-wrapper" style="overflow-x: auto; margin-top: 10px;">
+                                    <table class="detail-table search-result-table" style="width: 100%; min-width: 900px;">
+                                        <thead>
+                                            <tr>
+                                                <th>ソース</th>
+                                                <th>発注番号</th>
+                                                <th>製番</th>
+                                                <th>ユニット</th>
+                                                <th>品名</th>
+                                                <th>仕様１</th>
+                                                <th>数量</th>
+                                                <th>納期</th>
+                                                <th>仕入先</th>
+                                                <th>発注者</th>
+                                                <th>受入状態</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                        `;
+                        
+                        data.details.forEach(detail => {
+                            const sourceLabel = detail.source === 'merged' ? 
+                                '<span style="color: green;">✅ マージ済</span>' : 
+                                '<span style="color: orange;">⚠️ 未マージ</span>';
+                            
+                            const actionButton = detail.order_id ? 
+                                `<button class="btn btn-sm btn-primary" onclick="showOrderDetails(${detail.order_id})">ユニット詳細</button>` : 
+                                '<span style="color: #6c757d;">⚠️受入には要マージ</span>';
+                            
+                            html += `
+                                <tr class="${detail.is_received ? 'received' : ''}">
+                                    <td>${sourceLabel}</td>
+                                    <td><strong>${searchNumber}</strong></td>
+                                    <td>${detail.seiban}</td>
+                                    <td>${detail.unit || '-'}</td>
+                                    <td title="${detail.item_name}">${detail.item_name}</td>
+                                    <td title="${detail.spec1 || '-'}">${detail.spec1 || '-'}</td>
+                                    <td>${detail.quantity} ${detail.unit_measure || ''}</td>
+                                    <td>${detail.delivery_date || '-'}</td>
+                                    <td>${detail.supplier || '-'}</td>
+                                    <td>${detail.staff || '-'}</td>
+                                    <td>
+                                        ${detail.is_received ? 
+                                            '<span style="color: green;">✅ 受入済</span>' : 
+                                            '<span style="color: orange;">🟨 未受入</span>'}
+                                    </td>
+                                    <td>${actionButton}</td>
+                                </tr>
+                            `;
+                        });
+                        
+                        html += `
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        `;
+                        
+                        resultDiv.innerHTML = html;
+                        showToast(`✅ 検索完了: ${data.count}件見つかりました`, 'success');
+                        
+                    } else {
+                        // 🔥 見つからない場合のメッセージ
+                        resultDiv.innerHTML = `
+                            <div class="alert alert-warning">
+                                <strong>発注番号 ${purchaseOrderNumber} が見つかりません</strong><br>
+                                <small>
+                                ・マージ済みデータベース: 検索済み<br>
+                                ・発注_ALLシート: 検索済み<br>
+                                ※発注番号を再確認してください
+                                </small>
+                            </div>
+                        `;
+                        showToast(`❌ 発注番号 ${purchaseOrderNumber} が見つかりません`, 'error');
+                    }
+                } catch (error) {
+                    showToast('検索エラー: ' + error, 'error');
+                }
+            }
+
+            // 仕様１で検索
+            async function searchBySpec1() {
+                const spec1 = document.getElementById('spec1Input').value.trim();
+                
+                if (!spec1) {
+                    showToast('仕様１を入力してください', 'warning');
+                    return;
+                }
+                
+                try {
+                    // 🔥 1段階目：マージ済みデータのみ検索
+                    showToast('1.マージされたデータから検索中...', 'info', 2000);
+                    
+                    const response = await fetch(`/api/search-by-spec1/${encodeURIComponent(spec1)}`);
+                    const data = await response.json();
+                    
+                    // 🔥 キャッシュ読み込みが必要な場合は先にトースト表示
+                    if (data.cache_needs_loading) {
+                        showToast('2.マージされたデータの中から仕様１を見つけられませんでした。発注リストデータベースより検索します（時間がかかります）', 'warning', 5000);
+                        
+                        // 🔥 少し待機してから結果を表示（読み込み時間を体感させる）
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                    }
+                    
+                    const resultDiv = document.getElementById('spec1SearchResult');
+                    
+                    if (data.found) {
+                        // 🔥 未マージデータがある場合のトースト
+                        if (data.has_unmerged) {
+                            showToast('2.マージされたデータの中から仕様１を見つけられませんでした。発注リストデータベースより検索します（時間がかかります）', 'warning', 5000);
+                        }
+                        
+                        // 🔥 未マージデータの警告
+                        let warningHtml = '';
+                        if (data.has_unmerged) {
+                            warningHtml = `
+                                <div class="alert alert-warning" style="margin-bottom: 10px;">
+                                    ⚠️ 未マージデータが含まれています（発注_ALLシートから取得）<br>
+                                    <small>※これらのデータは受入処理できません。マージ処理を実行してください。</small>
+                                </div>
+                            `;
+                        }
+                        
+                        let html = `
+                            ${warningHtml}
+                            <div class="alert alert-success">
+                                <h4>検索結果: ${data.count}件</h4>
+                                <div class="table-wrapper" style="overflow-x: auto; margin-top: 10px;">
+                                    <table class="detail-table search-result-table" style="width: 100%; min-width: 900px;">
+                                        <thead>
+                                            <tr>
+                                                <th>ソース</th>
+                                                <th>発注番号</th>
+                                                <th>製番</th>
+                                                <th>ユニット</th>
+                                                <th>品名</th>
+                                                <th>仕様１</th>
+                                                <th>数量</th>
+                                                <th>納期</th>
+                                                <th>仕入先</th>
+                                                <th>発注者</th>
+                                                <th>受入状態</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                        `;
+                        
+                        data.details.forEach(detail => {
+                            const sourceLabel = detail.source === 'merged' ? 
+                                '<span style="color: green;">✅ マージ済</span>' : 
+                                '<span style="color: orange;">⚠️ 未マージ</span>';
+                            
+                            const actionButton = detail.order_id ? 
+                                `<button class="btn btn-sm btn-primary" onclick="showOrderDetails(${detail.order_id})">詳細</button>` : 
+                                '<span style="color: #6c757d;">マージ処理が必要</span>';
+                            
+                            html += `
+                                <tr class="${detail.is_received ? 'received' : ''}">
+                                    <td>${sourceLabel}</td>
+                                    <td>${detail.order_number || '-'}</td>
+                                    <td>${detail.seiban}</td>
+                                    <td>${detail.unit || '-'}</td>
+                                    <td title="${detail.item_name}">${detail.item_name}</td>
+                                    <td title="${detail.spec1 || '-'}">
+                                        ${highlightSearchTerm(detail.spec1 || '-', spec1)}
+                                    </td>
+                                    <td>${detail.quantity} ${detail.unit_measure || ''}</td>
+                                    <td>${detail.delivery_date || '-'}</td>
+                                    <td>${detail.supplier || '-'}</td>
+                                    <td>${detail.staff || '-'}</td>
+                                    <td>
+                                        ${detail.is_received ? 
+                                            '<span style="color: green;">✅ 受入済</span>' : 
+                                            '<span style="color: orange;">🟨 未受入</span>'}
+                                    </td>
+                                    <td>${actionButton}</td>
+                                </tr>
+                            `;
+                        });
+                        
+                        html += `
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        `;
+                        
+                        resultDiv.innerHTML = html;
+                        showToast(`✅ 検索完了: ${data.count}件見つかりました`, 'success');
+                    } else {
+                        resultDiv.innerHTML = `
+                            <div class="alert alert-warning">
+                                <strong>仕様１ "${spec1}" が見つかりません</strong><br>
+                                <small>
+                                ・マージ済みデータベース: 検索済み<br>
+                                ・発注_ALLシート: 検索済み<br>
+                                ※仕様１を再確認してください
+                                </small>
+                            </div>
+                        `;
+                        showToast(`❌ 仕様１ "${spec1}" が見つかりません`, 'error');
+                    }
+                } catch (error) {
+                    showToast('検索エラー: ' + error, 'error');
+                }
+            }
+            
+            // 🔥 検索ワードをハイライトする補助関数
+            function highlightSearchTerm(text, searchTerm) {
+                if (!text || !searchTerm) return text;
+                
+                const regex = new RegExp(`(${searchTerm})`, 'gi');
+                return text.replace(regex, '<span style="background-color: yellow; font-weight: bold;">$1</span>');
+            }
+            // 発注番号で一括受入
+            async function receiveByPurchaseOrder() {
+                const purchaseOrderNumber = document.getElementById('purchaseOrderInput').value.trim();
+                
+                if (!purchaseOrderNumber) {
+                    showToast('発注番号を入力してください', 'warning');
+                    return;
+                }
+                
+                // 浮動小数点形式を整数形式に変換
+                let searchNumber = purchaseOrderNumber;
+                if (searchNumber.includes('.0')) {
+                    searchNumber = searchNumber.replace('.0', '');
+                }
+                
+                if (!confirm(`発注番号 ${searchNumber} のアイテムを一括受入しますか？`)) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/api/receive-by-purchase-order', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            purchase_order_number: searchNumber
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        showToast(data.message, data.has_internal_processing ? 'warning' : 'success');
+                        
+                        // 画面を更新
+                        searchByPurchaseOrder();
+                        loadOrders();
+                        loadPurchaseOrderStats();
+                    } else {
+                        showToast('エラー: ' + data.error, 'error');
+                    }
+                } catch (error) {
+                    showToast('受入エラー: ' + error, 'error');
+                }
+            }
+
+            // 発注番号統計を読み込み
+            async function loadPurchaseOrderStats() {
+                try {
+                    const response = await fetch('/api/purchase-order-stats');
+                    const data = await response.json();
+                    
+                    const statsDiv = document.getElementById('purchaseOrderStats');
+                    
+                if (data.stats && data.stats.length > 0) {
+                    let html = `
+                        <p>総発注数: ${data.total_orders}件</p>
+                        <div style="max-height: 400px; overflow-y: auto;">
+                            <table class="detail-table" style="width: 100%;">
+                                <thead>
+                                    <tr>
+                                        <th>発注番号</th>
+                                        <th>品名</th>
+                                        <th>仕様1</th>
+                                        <th>アイテム数</th>
+                                        <th>総数量</th>
+                                        <th>受入済</th>
+                                        <th>完了率</th>
+                                        <th>アクション</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                    `;
+
+                    data.stats.forEach(stat => {
+                        const statusColor = stat.completion_rate === 100 ? 'green' : 
+                                        stat.completion_rate > 0 ? 'orange' : 'red';
+                        
+                        let displayNumber = stat.purchase_order_number;
+                        if (displayNumber && displayNumber.includes('.0')) {
+                            displayNumber = displayNumber.replace('.0', '');
+                        }
+                        
+                        html += `
+                            <tr>
+                                <td><strong>${displayNumber}</strong></td>
+                                <td title="${stat.item_name}">${stat.item_name.length > 15 ? stat.item_name.substring(0, 15) + '...' : stat.item_name}</td>
+                                <td title="${stat.spec1}">${stat.spec1.length > 15 ? stat.spec1.substring(0, 15) + '...' : stat.spec1}</td>
+                                <td>${stat.total_items}</td>
+                                <td>${stat.total_quantity}</td>
+                                <td>${stat.received_items}</td>
+                                <td>
+                                    <div class="progress-bar" style="width: 100px; display: inline-block;">
+                                        <div class="progress-fill" style="width: ${stat.completion_rate}%; background: ${statusColor};"></div>
+                                    </div>
+                                    ${stat.completion_rate}%
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-primary" 
+                                        onclick="document.getElementById('purchaseOrderInput').value='${displayNumber}'; searchByPurchaseOrder();">
+                                        ユニット詳細
+                                    </button>
+                                    ${stat.completion_rate < 100 ? `
+                                        <button class="btn btn-sm btn-success" 
+                                            onclick="document.getElementById('purchaseOrderInput').value='${displayNumber}'; receiveByPurchaseOrder();">
+                                            受入
+                                        </button>
+                                    ` : ''}
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    
+                    html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                    
+                    statsDiv.innerHTML = html;
+                } else {
+                        statsDiv.innerHTML = '<p>発注データがありません</p>';
+                    }
+                } catch (error) {
+                    console.error('統計読み込みエラー:', error);
+                    showToast('統計読み込みエラー', 'error');
+                }
+            }
+
+
+            // 仕様1入力でEnterキー対応
+            document.getElementById('spec1Input').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    searchBySpec1();
+                }
+            });
+
+            // ページ読み込み時に統計を表示
+            document.addEventListener('DOMContentLoaded', function() {
+                // 初期データ読み込み
+                loadOrders();
+                loadArchivedOrders();
+                setupDragDrop();
+                
+                // ネットワークファイルチェックと自動読み込み
+                checkNetworkFile();
+                loadNetworkFile();  // 自動的にシート選択を表示
+                
+                // システムステータス読み込み
+                loadSystemStatus();
+                loadHistoryData();
+                
+                // 🔥 一括削除ボタンのイベントリスナー（一度だけ登録）
+                document.getElementById('deleteMultipleBtn').addEventListener('click', async () => {
+                    const checkboxes = document.querySelectorAll('.seiban-checkbox:checked');
+                    
+                    if (checkboxes.length === 0) {
+                        showToast('削除する製番を選択してください', 'warning');
+                        return;
+                    }
+                    
+                    // チェックされた製番から注文IDを収集
+                    const orderIds = [];
+                    const seibans = [];
+                    
+                    checkboxes.forEach(cb => {
+                        seibans.push(cb.value);
+                        const ids = cb.getAttribute('data-order-ids').split(',').map(id => parseInt(id));
+                        orderIds.push(...ids);
+                    });
+                    
+                    if (orderIds.length === 0) {
+                        showToast('削除対象の注文が見つかりません', 'warning');
+                        return;
+                    }
+                    
+                    if (!confirm(`${seibans.length}件の製番（計${orderIds.length}ユニット）を削除しますか？\n\n製番: ${seibans.join(', ')}\n\nこの操作は取り消せません。`)) {
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch('/api/orders/delete-multiple', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({order_ids: orderIds})
+                        });
+                        
+                        const result = await response.json();
+                        
+                        if (result.success) {
+                            showToast(result.message, 'success');
+                            loadOrders();
+                        } else {
+                            showToast('エラー: ' + result.error, 'error');
+                        }
+                    } catch (error) {
+                        showToast('削除に失敗しました: ' + error, 'error');
+                    }
+                });
+                
+                // 定期実行タイマー
+                setInterval(loadSystemStatus, 3600000);  // 60分ごと
+                setInterval(checkForUpdates, 600000);    // 10分ごと
+            });
+            </script>
+
+            <!-- パレット管理タブ -->
+            <div id="pallets-tab" class="tab-content">
+                <h2>🏢 ユニット保管場所</h2>
+                
+                <!-- 検索セクション -->
+                <div class="upload-section">
+                    <h3>🔍 製番検索</h3>
+                    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                        <input type="text" id="seibanSearchInput" placeholder="製番または品名を入力..." 
+                            style="flex: 1; padding: 10px; border: 1px solid #ced4da; border-radius: 5px; font-size: 1em;">
+                        <button class="btn btn-primary" onclick="searchSeiban()">🔍 検索</button>
+                    </div>
+                    <div id="searchResults"></div>
+                </div>
+                
+                <!-- パレット統計 -->
+                <div class="upload-section">
+                    <h3>📊 保管統計</h3>
+                    <div id="palletStats"></div>
+                </div>
+                
+                <!-- パレット一覧 -->
+                <div class="upload-section">
+                    <h3>📦 保管場所一覧(P=パレット,T=棚,D=台車)　🟡受入準備前,🔵納品中,🟢納品完了</h3>
+                    <div id="palletList" class="order-grid"></div>
+                </div>
+            </div>
+            
+            <!-- アーカイブタブ -->
+            <div id="archive-tab" class="tab-content">
+                <h2>🗄️ アーカイブ（納品完了）</h2>
+                <p>納品完了してアーカイブされた注文一覧</p>
+                <div id="archiveGrid" class="order-grid"></div>
+            </div>
+
+            <!-- 発行履歴タブ -->
+            <div id="history-tab" class="tab-content">
+                <h2>📊 発行履歴</h2>
+                <button class="btn btn-primary" onclick="loadHistoryData()">
+                    履歴を更新
+                </button>
+                <button class="btn btn-warning" onclick="document.getElementById('historyFileInput').click()" style="margin-left: 10px;">
+                    履歴ファイルを手動インポート
+                </button>
+                <input type="file" id="historyFileInput" accept=".xlsx" style="display: none;" onchange="importHistory(this)">
+                
+                <div id="historyList" style="margin-top: 20px;">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>履歴を読み込み中...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 詳細モーダル -->
+    <div id="detailModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">注文詳細</h2>
+                <button onclick="closeModal()" style="background: none; border: none; color: white; font-size: 1.5em; cursor: pointer;">×</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+        </div>
+    </div>
+
+    <!-- トースト通知コンテナ -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script>
+        let currentFilePath = '';
+        let currentOrderId = null;
+
+        // トースト通知関数
+        function showToast(message, type = 'info', duration = 3000) {
+            const toastContainer = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            
+            toastContainer.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.animation = 'slideIn 0.3s ease-out reverse';
+                setTimeout(() => {
+                    toast.remove();
+                }, 300);
+            }, duration);
+        }
+
+        // Check for file updates
+        async function checkForUpdates() {
+            try {
+                const response = await fetch('/api/check-update');
+                const data = await response.json();
+                
+                if (data.has_update) {
+                    if (confirm(`${data.message}\n\nデータを更新しますか？`)) {
+                        await loadNetworkFile();
+                        loadOrders();
+                    }
+                }
+            } catch (error) {
+                console.error('Update check error:', error);
+            }
+        }
+
+        // Debug paths
+        async function debugPaths() {
+            try {
+                const response = await fetch('/api/debug-paths');
+                const data = await response.json();
+                
+                let message = '📊 パス診断結果\n\n';
+                
+                // 設定されているパス
+                message += '【設定パス】\n';
+                for (const [name, path] of Object.entries(data.configured_paths)) {
+                    message += `${name}: ${path}\n`;
+                }
+                
+                message += '\n【接続状態】\n';
+                for (const [name, info] of Object.entries(data.path_checks)) {
+                    message += `${name}: ${info.os_exists ? '✅ 接続OK' : '❌ 接続失敗'}\n`;
+                    if (info.size_mb) {
+                        message += `  サイズ: ${info.size_mb} MB\n`;
+                    }
+                    if (info.error) {
+                        message += `  エラー: ${info.error}\n`;
+                    }
+                }
+                
+                message += `\n【サーバー接続】\n`;
+                message += `\\\\server3: ${data.server_connection.connected ? '✅ 接続OK' : '❌ 接続失敗'}\n`;
+                
+                console.log('Debug info:', data);
+                alert(message);
+                
+                // 詳細情報をコンソールに出力
+                console.table(data.path_checks);
+            } catch (error) {
+                alert('診断エラー: ' + error);
+            }
+        }
+
+        // Check network file availability
+        async function checkNetworkFile() {
+            try {
+                const response = await fetch('/api/check-network-file-with-diff');
+                const data = await response.json();
+                
+                const infoDiv = document.getElementById('networkFileInfo');
+                if (data.accessible) {
+                    let html = `
+                        <div class="alert alert-success">
+                            ✅ ネットワークファイル接続可能<br>
+                            ファイル: ${data.filename}<br>
+                            サイズ: ${data.size_mb} MB<br>
+                            最終更新: ${new Date(data.modified * 1000).toLocaleString('ja-JP')}<br>
+                            総件数: ${data.total_rows || 0}件 (製番: ${data.unique_seibans || 0}種類)
+                    `;
+                    
+                    if (data.diff && data.diff.length > 0) {
+                        html += `<br><br><strong>📊 更新検出:</strong><br>`;
+                        html += `<div style="max-height: 300px; overflow-y: auto; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px; background: #f8fff9;">`;
+                        
+                        data.diff.forEach(item => {
+                            let displayText = `<span style="color: #28a745; font-weight: bold;">▲ ${item.seiban}`;
+                            
+                            if (item.customer_abbr) {
+                                displayText += ` <span style="color: #6c757d;">(${item.customer_abbr})</span>`;
+                            }
+                            
+                            displayText += `:</span>`;
+                            
+                            if (item.product_name) {
+                                displayText += ` <span style="color: #495057;">${item.product_name}</span>`;
+                            }
+                            
+                            if (item.memo2) {
+                                displayText += ` <span style="color: #6c757d; font-style: italic;">${item.memo2}</span>`;
+                            }
+                            
+                            displayText += ` <span style="color: #28a745;">+${item.added}件</span> <span style="color: #6c757d;">(計${item.total}件)</span>`;
+                            
+                            html += `${displayText}<br>`;
+                        });
+                        
+                        html += `</div>`;
+                    }
+                    
+                    html += '</div>';
+                    infoDiv.innerHTML = html;
+                    
+                    loadNetworkFile();
+                } else {
+                    infoDiv.innerHTML = `
+                        <div class="alert alert-warning">
+                            ⚠️ ネットワークファイルに接続できません<br>
+                            エラー: ${data.error}<br>
+                            手動でファイルをアップロードしてください。
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Network check error:', error);
+            }
+        }
+
+        // Load system status
+        async function loadSystemStatus() {
+            try {
+                const response = await fetch('/api/get-system-status');
+                const status = await response.json();
+                
+                if (status.last_refresh) {
+                    const statusDiv = document.getElementById('systemStatus');
+                    statusDiv.style.display = 'block';
+                    
+                    const lastRefresh = new Date(status.last_refresh);
+                    const now = new Date();
+                    const diffMinutes = Math.floor((now - lastRefresh) / 60000);
+                    
+                    document.getElementById('statusMessage').innerHTML = `
+                        最終更新: ${lastRefresh.toLocaleString('ja-JP')} (${diffMinutes}分前)<br>
+                        自動更新: ${status.auto_refresh_enabled ? '有効' : '無効'} 
+                        (間隔: ${status.refresh_interval_minutes}分)<br>
+                        ODBC: ${status.odbc_enabled ? '有効' : '無効'}
+                    `;
+                    
+                    // Update progress bar
+                    const progress = Math.min(100, (diffMinutes / status.refresh_interval_minutes) * 100);
+                    document.getElementById('statusProgress').style.width = progress + '%';
+                }
+            } catch (error) {
+                console.error('Status load error:', error);
+            }
+        }
+
+        // Load file from network
+        async function loadNetworkFile() {
+            document.getElementById('loadingIndicator').style.display = 'block';
+            
+            try {
+                const response = await fetch('/api/load-network-file', { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentFilePath = data.filepath;
+                    populateSheetSelects(data.sheet_names);
+                    document.getElementById('sheetSelection').style.display = 'block';
+                    
+                    const info = data.file_info;
+                    // 🔥 alertをトースト通知に変更（処理を中断しない）
+                    showToast(`ネットワークファイル読み込み成功！\nファイル: ${info.filename}\nサイズ: ${info.size_mb} MB`, 'success', 3000);
+                } else {
+                    if (data.suggest_upload) {
+                        if (confirm(`エラー: ${data.error}\n\n手動でファイルをアップロードしますか？`)) {
+                            document.getElementById('fileInput').click();
+                        }
+                    } else {
+                        showToast('エラー: ' + data.error, 'error');
+                    }
+                }
+            } catch (error) {
+                showToast('ネットワーク読み込みエラー: ' + error, 'error');
+            } finally {
+                document.getElementById('loadingIndicator').style.display = 'none';
+            }
+        }
+
+        // Load from ODBC
+        async function loadFromODBC() {
+            const seiban = prompt('製番を入力してください (例: MHT0123):');
+            if (!seiban) return;
+            
+            document.getElementById('loadingIndicator').style.display = 'block';
+            
+            try {
+                const response = await fetch('/api/load-from-odbc', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ seiban: seiban })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(data.message);
+                    loadOrders();
+                } else {
+                    alert('ODBCエラー: ' + data.error);
+                }
+            } catch (error) {
+                alert('ODBC接続エラー: ' + error);
+            } finally {
+                document.getElementById('loadingIndicator').style.display = 'none';
+            }
+        }
+
+        // Tab switching
+        function switchTab(tabName) {
+            document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById(`${tabName}-tab`).classList.add('active');
+            
+            if (tabName === 'orders') {
+                loadOrders();
+            } else if (tabName === 'archive') {
+                loadArchivedOrders();
+            }
+        }
+
+        // batファイル起動ボタンの機能を修正
+        async function refreshExcelFile() {
+            const infoDiv = document.getElementById("networkFileInfo");
+            infoDiv.innerHTML = '<div class="spinner"></div><p>Excelファイルを更新中...</p>';
+            
+            try {
+                const response = await fetch('/api/refresh-excel', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                console.log('📊 refresh-excel response:', data);  // 🔥 デバッグログ
+                
+                if (data.success) {
+                    // 🔥 少し待機してからファイル情報を取得
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    // 更新後に差分情報を取得
+                    const diffResponse = await fetch('/api/check-network-file-with-diff');
+                    const fileData = await diffResponse.json();
+                    
+                    console.log('📊 check-network-file-with-diff response:', fileData);  // 🔥 デバッグログ
+                    
+                    // 🔥 データ検証
+                    if (!fileData.accessible) {
+                        infoDiv.innerHTML = `
+                            <div class="alert alert-warning">
+                                ⚠️ ファイル情報取得エラー: ${fileData.error || '不明なエラー'}
+                            </div>
+                        `;
+                        return;
+                    }
+                    
+                    let html = `
+                        <div class="alert alert-success">
+                            ✅ ${data.message}<br>
+                            ファイル: ${fileData.filename || '不明'}<br>
+                            サイズ: ${fileData.size_mb || 0} MB<br>
+                            最終更新: ${fileData.modified ? new Date(fileData.modified * 1000).toLocaleString('ja-JP') : '不明'}<br>
+                            手配リスト総件数: ${fileData.total_seibans || 0}件
+                    `;
+                    
+                    if (fileData.diff && fileData.diff.length > 0) {
+                        html += `<br><br><strong>📊 更新検出:</strong><br>`;
+                        html += `<div style="max-height: 300px; overflow-y: auto; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px; background: #f8fff9;">`;
+                        
+                        fileData.diff.forEach(item => {
+                            let displayText = `<span style="color: #28a745; font-weight: bold;">▲ ${item.seiban}`;
+                            
+                            if (item.customer_abbr) {
+                                displayText += ` <span style="color: #6c757d;">(${item.customer_abbr})</span>`;
+                            }
+                            
+                            displayText += `:</span>`;
+                            
+                            if (item.product_name) {
+                                displayText += ` <span style="color: #495057;">${item.product_name}</span>`;
+                            }
+                            
+                            if (item.memo2) {
+                                displayText += ` <span style="color: #6c757d; font-style: italic;">${item.memo2}</span>`;
+                            }
+                            
+                            displayText += ` <span style="color: #28a745;">+${item.added}件</span> <span style="color: #6c757d;">(計${item.total}件)</span>`;
+                            
+                            html += `${displayText}<br>`;
+                        });
+                        
+                        html += `</div>`;
+                    } else {
+                        html += `<br><span style="color: #6c757d;">新規データなし</span>`;
+                    }
+                    
+                    html += '</div>';
+                    infoDiv.innerHTML = html;
+                    showToast('Excelファイルを更新しました', 'success');
+                } else {
+                    infoDiv.innerHTML = `
+                        <div class="alert alert-danger">
+                            ❌ 更新失敗: ${data.error}
+                        </div>
+                    `;
+                    showToast('更新エラー: ' + data.error, 'error');
+                }
+            } catch (error) {
+                console.error('❌ refreshExcelFile error:', error);  // 🔥 デバッグログ
+                infoDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        ❌ 通信エラー: ${error}
+                    </div>
+                `;
+                showToast('通信エラー', 'error');
+            }
+        }
+
+        // Pythonスクリプトを実行
+        async function runRefreshScript() {
+            const infoDiv = document.getElementById("networkFileInfo");
+            infoDiv.innerHTML = '<div class="spinner"></div><p>更新スクリプトを実行中...</p>';
+            
+            try {
+                const response = await fetch('/api/run-refresh-script', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    infoDiv.innerHTML = `
+                        <div class="alert alert-success">
+                            ✅ スクリプト実行成功<br>
+                            <pre style="max-height: 200px; overflow-y: auto;">${data.output}</pre>
+                        </div>
+                    `;
+                    showToast('更新スクリプト実行成功', 'success');
+                    
+                    // ネットワークファイル情報を再取得
+                    setTimeout(() => {
+                        checkNetworkFile();
+                        loadNetworkFile();
+                    }, 2000);
+                } else {
+                    infoDiv.innerHTML = `
+                        <div class="alert alert-danger">
+                            ❌ 実行失敗: ${data.error}
+                        </div>
+                    `;
+                    showToast('実行エラー: ' + data.error, 'error');
+                }
+            } catch (error) {
+                console.error(error);
+                infoDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        ❌ 通信エラー: ${error}
+                    </div>
+                `;
+                showToast('通信エラー', 'error');
+            }
+        }
+
+        // Load archived orders
+        async function loadArchivedOrders() {
+            try {
+                const response = await fetch('/api/archived-orders');
+                const orders = await response.json();
+                
+                const archiveGrid = document.getElementById('archiveGrid');
+                archiveGrid.innerHTML = '';
+                
+                if (orders.length === 0) {
+                    archiveGrid.innerHTML = '<p>アーカイブされた注文はありません</p>';
+                    return;
+                }
+                
+                orders.forEach(order => {
+                    const card = document.createElement('div');
+                    card.className = 'order-card';
+                    card.onclick = () => showOrderDetails(order.id);
+                    
+                    card.innerHTML = `
+                        <div class="order-header">
+                            <span class="order-seiban">${order.seiban}</span>
+                            <span class="order-status status-納品完了">納品完了</span>
+                        </div>
+                        ${order.product_name ? `<p><strong>品名:</strong> ${order.product_name}</p>` : ''}
+                        <p><strong>ユニット:</strong> ${order.unit || '-'}</p>
+                        <p><strong>場所:</strong> ${order.location}</p>
+                        <p><strong>アーカイブ日:</strong> ${new Date(order.archived_at).toLocaleString('ja-JP')}</p>
+                        <div style="margin-top: 10px;">
+                            <button class="btn btn-primary" onclick="event.stopPropagation(); exportOrder(${order.id})">Excel出力</button>
+                            <button class="btn btn-warning" onclick="event.stopPropagation(); unarchiveOrder(${order.id})">復元</button>
+                        </div>
+                    `;
+                    
+                    archiveGrid.appendChild(card);
+                });
+            } catch (error) {
+                console.error('Error loading archived orders:', error);
+            }
+        }
+
+        // Archive order
+        async function archiveOrder(orderId) {
+            if (!confirm('この注文をアーカイブしますか？')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/order/${orderId}/archive`, {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast(data.message, 'success');
+                    loadOrders();
+                } else {
+                    showToast('エラー: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showToast('アーカイブエラー: ' + error, 'error');
+            }
+        }
+
+        // Unarchive order
+        async function unarchiveOrder(orderId) {
+            if (!confirm('この注文を復元しますか？')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/order/${orderId}/unarchive`, {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showToast(data.message, 'success');
+                    loadArchivedOrders();
+                } else {
+                    showToast('エラー: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showToast('復元エラー: ' + error, 'error');
+            }
+        }
+
+        // File upload handling
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            handleFileUpload(e.target.files[0]);
+        });
+
+        function setupDragDrop() {
+            const uploadArea = document.querySelector('.upload-area');
+            
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+            
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                handleFileUpload(e.dataTransfer.files[0]);
+            });
+        }
+
+        async function handleFileUpload(file) {
+            if (!file) return;
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            document.getElementById('loadingIndicator').style.display = 'block';
+            
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentFilePath = data.filepath;
+                    populateSheetSelects(data.sheet_names);
+                    document.getElementById('sheetSelection').style.display = 'block';
+                    document.getElementById('uploadText').innerHTML = `
+                        <p style="font-size: 3em;">✅</p>
+                        <p>${file.name} アップロード完了</p>
+                    `;
+                } else {
+                    alert('エラー: ' + data.error);
+                }
+            } catch (error) {
+                alert('アップロードエラー: ' + error);
+            } finally {
+                document.getElementById('loadingIndicator').style.display = 'none';
+            }
+        }
+
+        function populateSheetSelects(sheetNames) {
+            const sheet1Select = document.getElementById('sheet1Select');
+            const sheet2Select = document.getElementById('sheet2Select');
+            
+            sheet1Select.innerHTML = '';
+            sheet2Select.innerHTML = '';
+            
+            sheetNames.forEach((name, index) => {
+                sheet1Select.innerHTML += `<option value="${name}">${name}</option>`;
+                sheet2Select.innerHTML += `<option value="${name}">${name}</option>`;
+            });
+            
+            if (sheetNames.length > 1) {
+                sheet2Select.selectedIndex = 1;
+            }
+        }
+
+        // 発注日フィルタの表示切替
+        function toggleOrderDateFilter() {
+            const enabled = document.getElementById('enableOrderDateFilter').checked;
+            const filterInput = document.getElementById('orderDateFilterInput');
+            
+            if (enabled) {
+                filterInput.style.display = 'block';
+                // デフォルトで1ヶ月前から今日までの期間を設定
+                const oneMonthAgo = new Date();
+                oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+                document.getElementById('orderDateFrom').valueAsDate = oneMonthAgo;
+                document.getElementById('orderDateTo').valueAsDate = new Date();
+            } else {
+                filterInput.style.display = 'none';
+            }
+        }
+
+        // processFile関数を修正
+        async function processFile() {
+            const sheet1 = document.getElementById('sheet1Select').value;
+            const sheet2 = document.getElementById('sheet2Select').value;
+            const seiban = document.getElementById('seibanInput').value;
+            
+            if (!seiban) {
+                alert('製番を入力してください');
+                return;
+            }
+            
+            // 発注日フィルタの取得
+            let orderDateFrom = null;
+            let orderDateTo = null;
+            if (document.getElementById('enableOrderDateFilter').checked) {
+                const dateFromValue = document.getElementById('orderDateFrom').value;
+                const dateToValue = document.getElementById('orderDateTo').value;
+                
+                if (dateFromValue) {
+                    orderDateFrom = dateFromValue;  // YYYY-MM-DD形式
+                }
+                if (dateToValue) {
+                    orderDateTo = dateToValue;  // YYYY-MM-DD形式
+                }
+            }
+            
+            document.getElementById('loadingIndicator').style.display = 'block';
+            
+            try {
+                const requestBody = {
+                    filepath: currentFilePath,
+                    sheet1: sheet1,
+                    sheet2: sheet2,
+                    seiban: seiban
+                };
+                
+                // 発注日フィルタがある場合は追加
+                if (orderDateFrom) {
+                    requestBody.order_date_from = orderDateFrom;
+                }
+                if (orderDateTo) {
+                    requestBody.order_date_to = orderDateTo;
+                }
+                
+                const response = await fetch('/api/process', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    let message = '処理完了: ' + data.message;
+                    if (orderDateFrom || orderDateTo) {
+                        if (orderDateFrom && orderDateTo) {
+                            message += `\n📅 発注日フィルタ: ${orderDateFrom} 〜 ${orderDateTo}`;
+                        } else if (orderDateFrom) {
+                            message += `\n📅 発注日フィルタ: ${orderDateFrom}以降`;
+                        } else if (orderDateTo) {
+                            message += `\n📅 発注日フィルタ: ${orderDateTo}まで`;
+                        }
+                    }
+                    alert(message);
+                    loadOrders();
+                    
+                    // フォームリセット
+                    document.getElementById('seibanInput').value = '';
+                    document.getElementById('sheetSelection').style.display = 'none';
+                    document.getElementById('enableOrderDateFilter').checked = false;
+                    document.getElementById('orderDateFilterInput').style.display = 'none';
+                    document.getElementById('uploadText').innerHTML = `
+                        <p style="font-size: 3em;">📁</p>
+                        <p>クリックまたはドラッグ&ドロップでファイルを選択</p>
+                        <p style="color: #6c757d; font-size: 0.9em;">対応形式: .xlsx, .xls (最大50MB)</p>
+                    `;
+                } else {
+                    alert('エラー: ' + data.error);
+                }
+            } catch (error) {
+                alert('処理エラー: ' + error);
+            } finally {
+                document.getElementById('loadingIndicator').style.display = 'none';
+            }
+        }
+
+        async function loadOrders() {
+            try {
+                const response = await fetch('/api/orders');
+                const orders = await response.json();
+                
+                // 製番でグループ化
+                const groupedBySeiban = {};
+                orders.forEach(order => {
+                    if (!groupedBySeiban[order.seiban]) {
+                        groupedBySeiban[order.seiban] = {
+                            seiban: order.seiban,
+                            product_name: order.product_name,
+                            customer_abbr: order.customer_abbr, 
+                            memo2: order.memo2,
+                            units: []
+                        };
+                    }
+                    groupedBySeiban[order.seiban].units.push(order);
+                });
+                
+                // 製番でソート
+                const sortedSeibans = Object.keys(groupedBySeiban).sort();
+                
+                // orderGrid要素を取得
+                const orderGrid = document.getElementById('orderGrid');
+                orderGrid.innerHTML = '';
+                
+                sortedSeibans.forEach(seiban => {
+                    const group = groupedBySeiban[seiban];
+                    
+                    // 親要素（製番レベル）
+                    const parentCard = document.createElement('div');
+                    parentCard.className = 'seiban-group';
+                    
+                    // グループ全体の統計を計算
+                    const totalDetails = group.units.reduce((sum, unit) => sum + unit.detail_count, 0);
+                    const totalReceived = group.units.reduce((sum, unit) => sum + unit.received_count, 0);
+                    const hasInternalProcessing = group.units.some(unit => unit.has_internal_processing);
+                    
+                    // 全体のステータスを決定
+                    const allCompleted = group.units.every(unit => unit.status === '納品完了');
+                    const anyInProgress = group.units.some(unit => unit.status === '納品中');
+                    const overallStatus = allCompleted ? '納品完了' : (anyInProgress ? '納品中' : '受入準備前');
+                    
+                    parentCard.innerHTML = `
+                        <div class="seiban-header">
+                            <input type="checkbox" class="seiban-checkbox" value="${seiban}" 
+                            data-order-ids="${group.units.map(u => u.id).join(',')}" 
+                            style="margin-right: 10px;">
+                            <div onclick="toggleSeibanGroup('${seiban}')" style="flex: 1; cursor: pointer;">
+                                <div class="seiban-info">
+                                    <span class="seiban-toggle" id="toggle-${seiban}">📁</span>
+                                    <span class="seiban-title">${seiban}${group.customer_abbr ? '（' + group.customer_abbr + '）' : ''}</span>
+                                    <span class="seiban-product-name">${group.product_name || ''}${group.memo2 ? '　' + group.memo2 : ''}</span>
+                                    <span class="order-status status-${overallStatus}">${overallStatus}</span>
+                                </div>
+                                <div class="seiban-summary">
+                                    <span class="unit-count">${group.units.length} ユニット</span>
+                                    <span class="progress-text">${totalReceived}/${totalDetails} 完了</span>
+                                    ${hasInternalProcessing ? '<span class="internal-processing-warning">⚠️ 追加工有</span>' : ''}
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" style="width: ${totalDetails > 0 ? (totalReceived/totalDetails)*100 : 0}%"></div>
+                                </div>
+                                <div class="seiban-actions" style="display: flex; gap: 10px; align-items: center; padding-left: 15px;">
+                                    <button class="btn btn-primary" onclick="event.stopPropagation(); exportSeiban('${seiban}')" title="製番全体をExcel出力">
+                                        📄 受注リストexcel一括出力
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="unit-list" id="units-${seiban}" style="display: none;">
+                        </div>
+                    `;
+                    
+                    orderGrid.appendChild(parentCard);
+                    
+                    // 子要素（ユニットレベル）をユニットリストに追加
+                    const unitList = parentCard.querySelector(`#units-${seiban}`);
+                    group.units.forEach(order => {
+                        const unitCard = document.createElement('div');
+                        unitCard.className = `unit-card status-${order.status}`;
+                        unitCard.onclick = () => showOrderDetails(order.id);
+                        
+                        const isCompleted = order.status === '納品完了';
+                        
+                        unitCard.innerHTML = `
+                            <div class="unit-header">
+                                <span class="unit-name">ユニット：${order.unit || 'ユニット名無し'}</span>
+                                <span class="order-status status-${order.status}">${order.status}</span>
+                            </div>
+                            <div class="unit-details">
+                                <p><strong>📍 場所:</strong> ${order.location}</p>
+                                <p><strong>📊 進捗:</strong> ${order.received_count}/${order.detail_count} 完了</p>
+                                ${order.has_internal_processing ? 
+                                    '<p><span class="internal-processing-warning" style="display: inline-block; margin-top: 5px;">⚠️ 追加工有</span></p>' : ''
+                                }
+                                ${order.created_at ? 
+                                    `<p><strong>📅 シート作成日:</strong> ${order.created_at}</p>` : ''
+                                }
+                                ${order.updated_at ? 
+                                    `<p><strong>✒️ シート内容更新日:</strong> ${order.updated_at}</p>` : ''
+                                }
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${order.detail_count > 0 ? (order.received_count/order.detail_count)*100 : 0}%"></div>
+                            </div>
+                            <div class="unit-actions" style="margin-top: 5px; padding-top: 15px; border-top: 1px solid #e9ecef;">
+                                <button class="btn btn-primary" onclick="event.stopPropagation(); exportOrder(${order.id})">📄 Excel出力</button>
+                                ${isCompleted ? 
+                                    `<button class="btn btn-success" onclick="event.stopPropagation(); archiveOrder(${order.id})">📦 アーカイブへ</button>` : 
+                                    `<button class="btn btn-danger" onclick="event.stopPropagation(); deleteOrder(${order.id})">🗑️ 削除</button>`
+                                }
+                            </div>
+                        `;
+                        
+                        unitList.appendChild(unitCard);
+                    });
+                });
+
+                // 🔥 ガントチャートを更新
+                updateGanttChart(orders);
+            } catch (error) {
+                console.error('Error loading orders:', error);
+                showToast('注文読み込みエラー: ' + error, 'error');
+            }
+        }
+
+        // ガントチャートのクリック処理
+        async function handleGanttLabelClick(item) {
+            console.log('🔍 クリックされたアイテム:', item);
+            console.log('  - ラベル:', item.label);
+            console.log('  - 製番:', item.seiban);
+            
+            try {
+                const response = await fetch('/api/orders');
+                const orders = await response.json();
+                
+                console.log('📦 全注文数:', orders.length);
+                
+                // ラベルから製番とユニット名を分解
+                const [clickedSeiban, ...clickedUnitParts] = item.label.split('_');
+                const clickedUnit = clickedUnitParts.join('_'); // アンダースコアが複数ある場合に対応
+                
+                console.log('  - 分解した製番:', clickedSeiban);
+                console.log('  - 分解したユニット:', clickedUnit);
+                
+                // 該当する注文を検索
+                const targetOrder = orders.find(order => {
+                    const orderSeiban = order.seiban;
+                    const orderUnit = order.unit || 'ユニット名無し';
+                    
+                    console.log(`    比較: ${orderSeiban}_${orderUnit} === ${item.label}`);
+                    
+                    return orderSeiban === clickedSeiban && orderUnit === clickedUnit;
+                });
+                
+                if (targetOrder) {
+                    console.log('✅ 注文が見つかりました:', targetOrder);
+                    showOrderDetails(targetOrder.id);
+                } else {
+                    console.error('❌ 注文が見つかりません');
+                    console.log('検索対象:', orders.map(o => ({
+                        seiban: o.seiban,
+                        unit: o.unit || 'ユニット名無し',
+                        label: `${o.seiban}_${o.unit || 'ユニット名無し'}`
+                    })));
+                    showToast(`⚠️ ${item.label} の詳細が見つかりません`, 'warning');
+                }
+            } catch (error) {
+                console.error('❌ エラー:', error);
+                showToast(`エラー: ${error.message}`, 'error');
+            }
+        }
+
+        function toggleGanttChart() {
+            const container = document.getElementById('ganttChartContainer');
+            const icon = document.getElementById('ganttToggleIcon');
+            const text = document.getElementById('ganttToggleText');
+            
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                icon.textContent = '📉';
+                text.textContent = '非表示';
+            } else {
+                container.style.display = 'none';
+                icon.textContent = '📈';
+                text.textContent = '表示';
+            }
+        }
+                // 製番単位でのExcel出力
+                async function exportSeiban(seiban) {
+                    try {
+                        window.location.href = `/api/export-seiban/${seiban}`;
+                    } catch (error) {
+                        showToast('出力エラー: ' + error, 'error');
+                    }
+                }
+
+                function toggleSeibanGroup(seiban) {
+                    const unitList = document.getElementById(`units-${seiban}`);
+                    const toggle = document.getElementById(`toggle-${seiban}`);
+                    
+                    if (unitList && toggle) {
+                        if (unitList.style.display === 'none') {
+                            unitList.style.display = 'block';
+                            toggle.textContent = '📂';
+                            unitList.style.animation = 'fadeIn 0.3s';
+                        } else {
+                            unitList.style.display = 'none';
+                            toggle.textContent = '📁';
+                        }
+                    }
+                }
+
+                function filterOrders() {
+                    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+                    
+                    // 製番グループ（親要素）を検索対象にする
+                    const seibanGroups = document.querySelectorAll('.seiban-group');
+                    
+                    seibanGroups.forEach(group => {
+                        // 製番タイトルと製品名を取得
+                        const seibanTitle = group.querySelector('.seiban-title');
+                        const productName = group.querySelector('.seiban-product-name');
+                        
+                        let searchText = '';
+                        if (seibanTitle) {
+                            searchText += seibanTitle.textContent.toLowerCase();
+                        }
+                        if (productName) {
+                            searchText += ' ' + productName.textContent.toLowerCase();
+                        }
+                        
+                        // 検索条件に一致するかチェック
+                        if (searchText.includes(searchTerm)) {
+                            group.style.display = 'block';
+                        } else {
+                            group.style.display = 'none';
+                        }
+                    });
+                }
+
+                // showOrderDetails関数内の詳細リスト部分を修正
+                async function showOrderDetails(orderId) {
+                    currentOrderId = orderId;
+                    try {
+                        const response = await fetch(`/api/order/${orderId}`);
+                        const data = await response.json();
+                        
+                        document.getElementById('modalTitle').textContent = `${data.order.seiban} - ${data.order.unit}`;
+                        
+                        let detailsHtml = `
+                            <div class="qr-code">
+                                <img alt="QR Code" src="data:image/png;base64,${data.qr_code}">
+                                <p style="font-size: 0.9em; word-break: break-all;">ORDER:${orderId}</p>
+                            </div>
+                            <div class="form-group">
+                                <label>ステータス:</label>
+                                <select id="statusSelect">
+                                    <option value="受入準備前">受入準備前</option>
+                                    <option value="納品中">納品中</option>
+                                    <option value="納品完了">納品完了</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>場所:</label>
+                                <select id="floorSelect">
+                                    <option value="">未設定</option>
+                                    <option value="1F">1F</option>
+                                    <option value="2F">2F</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>パレット（棚）番号:</label>
+                                <select id="palletNumberSelect">
+                                    <option value="">未設定</option>
+                                    <!-- パレット -->
+                                    <option value="P001">P001(パレット)</option>
+                                    <option value="P002">P002(パレット)</option>
+                                    <option value="P003">P003(パレット)</option>
+                                    <option value="P004">P004(パレット)</option>
+                                    <option value="P005">P005(パレット)</option>
+                                    <option value="P006">P006(パレット)</option>
+                                    <option value="P007">P007(パレット)</option>
+                                    <option value="P008">P008(パレット)</option>
+                                    <option value="P009">P009(パレット)</option>
+                                    <option value="P010">P010(パレット)</option>
+                                    <!-- 台車 -->
+                                    <option value="D001">D001（台車）</option>
+                                    <option value="D002">D002（台車）</option>
+                                    <option value="D003">D003（台車）</option>
+                                    <!-- 棚 -->
+                                    <option value="T001">T001(棚)</option>
+                                    <option value="T002">T002(棚)</option>
+                                    <option value="T003">T003(棚)</option>
+                                    <option value="T004">T004(棚)</option>
+                                    <option value="T005">T005(棚)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>備考:</label>
+                                <textarea style="width: 100%; padding: 10px; border: 1px solid #ced4da; border-radius: 5px;" id="remarksInput">${data.order.remarks || ''}</textarea>
+                            </div>
+                            <button class="btn btn-primary" onclick="updateOrder()">更新</button>
+                            
+                            <h3>詳細リスト</h3>
+                            <table class="detail-table">
+                                <thead>
+                                    <tr>
+                                        <th>受入</th>
+                                        <th>納期</th>
+                                        <th>仕入先</th>
+                                        <th>発注番号</th>
+                                        <th>数量</th>
+                                        <th>品名</th>
+                                        <th>仕様１</th>
+                                        <th>仕様２</th>
+                                        <th>手配区分</th>
+                                        <th>備考</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                        `;
+                        
+                        // 🔥 親子階層表示を使用
+                        detailsHtml += displayOrderDetails(data.details);
+                        
+                        detailsHtml += `
+                                </tbody>
+                            </table>
+                        `;
+                        
+                        document.getElementById('modalBody').innerHTML = detailsHtml;
+                        document.getElementById('detailModal').classList.add('show');
+                        
+                        // Set current values
+                        document.getElementById('statusSelect').value = data.order.status;
+                        document.getElementById('floorSelect').value = data.order.floor || '';
+                        document.getElementById('palletNumberSelect').value = data.order.pallet_number || '';
+                    } catch (error) {
+                        alert('詳細取得エラー: ' + error);
+                    }
+                }
+
+                // 親子階層表示関数
+                function displayOrderDetails(details) {
+                    let html = '';
+                    const escapeHtml = (str) => (str || '').replace(/'/g, "\\'");
+                    const parentItems = details.filter(d => !d.parent_id);
+                    
+                    parentItems.forEach(parent => {
+                        html += `
+                            <tr class="${parent.is_received ? 'received' : ''}">
+                                <td>
+                                    ${parent.is_received ? 
+                                        `<span style="color: green;">✅ 受入済</span>
+                                        <button class="btn btn-sm btn-warning" onclick="toggleReceiveStatus(${parent.id}, false, '${escapeHtml(parent.order_number)}', '${escapeHtml(parent.spec1)}', '${escapeHtml(parent.item_name)}', '${parent.quantity || ''} ${parent.unit_measure || ''}')">取消</button>` : 
+                                        `<button class="btn btn-secondary" onclick="toggleReceiveStatus(${parent.id}, true, '${escapeHtml(parent.order_number)}', '${escapeHtml(parent.spec1)}', '${escapeHtml(parent.item_name)}', '${parent.quantity || ''} ${parent.unit_measure || ''}')">受入</button>`
+                                    }
+                                    ${parent.has_internal_processing ? '<span class="badge badge-warning">追加工有</span>' : ''}
+                                </td>
+                                <td>${parent.delivery_date || '-'}</td>
+                                <td>${parent.supplier || '-'}</td>
+                                <td>${parent.order_number || '-'}</td>
+                                <td>${parent.quantity || ''} ${parent.unit_measure || ''}</td>
+                                <td>${parent.item_name || '-'}</td>
+                                <td>${parent.spec1 || '-'}</td>
+                                <td>${parent.spec2 || '-'}</td>
+                                <td>${parent.order_type || '-'}</td>
+                                <td>${parent.remarks || '-'}</td>
+                            </tr>
+                        `;
+                        
+                        const children = details.filter(d => d.parent_id === parent.id);
+                        children.forEach(child => {
+                            html += `
+                                <tr class="${child.is_received ? 'received' : ''}" style="background: #f0f0f0;">
+                                    <td>
+                                        ${child.is_received ? 
+                                            `<span style="color: green;">✅ 受入済</span>
+                                            <button class="btn btn-sm btn-warning" onclick="toggleReceiveStatus(${child.id}, false, '${escapeHtml(child.order_number)}', '${escapeHtml(child.spec1)}', '${escapeHtml(child.item_name)}', '${child.quantity || ''} ${child.unit_measure || ''}')">取消</button>` : 
+                                            `<button class="btn btn-secondary" onclick="toggleReceiveStatus(${child.id}, true, '${escapeHtml(child.order_number)}', '${escapeHtml(child.spec1)}', '${escapeHtml(child.item_name)}', '${child.quantity || ''} ${child.unit_measure || ''}')">受入</button>`
+                                        }
+                                    </td>
+                                    <td>${child.delivery_date || '-'}</td>
+                                    <td>${child.supplier || '-'}</td>
+                                    <td>${child.order_number || '-'}</td>
+                                    <td>${child.quantity || ''} ${child.unit_measure || ''}</td>
+                                    <td style="padding-left: 30px;">└─ ${child.item_name || '-'}</td>
+                                    <td>${child.spec1 || '-'}</td>
+                                    <td>${child.spec2 || '-'}</td>
+                                    <td>${child.order_type || '-'}</td>
+                                    <td>${child.remarks || '-'}</td>
+                                </tr>
+                            `;
+                        });
+                    });
+                    
+                    return html;
+                }
+
+                // 受入状態をトグルする関数
+                async function toggleReceiveStatus(detailId, setReceived, orderNumber, spec1, itemName, quantity) {
+                    const action = setReceived ? '受入' : '受入取消';
+                    
+                    // 確認メッセージを作成
+                    const confirmMessage = `このアイテムを${action}しますか？\n\n` +
+                                        `発注番号: ${orderNumber || '未設定'}\n` +
+                                        `品名: ${itemName || '未設定'}\n` +
+                                        `仕様１: ${spec1 || '未設定'}\n` +
+                                        `数量: ${quantity || '未設定'}`;
+                    
+                    if (!confirm(confirmMessage)) {
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch(`/api/detail/${detailId}/toggle-receive`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ is_received: setReceived })
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            // 詳細なメッセージを表示
+                            const toastMessage = data.message + 
+                                                `\n発注番号: ${orderNumber || '未設定'}` +
+                                                `\n仕様１: ${spec1 || '未設定'}`;
+                            showToast(toastMessage, data.has_internal_processing ? 'warning' : 'success', 5000);
+                            
+                            showOrderDetails(currentOrderId);
+                            loadOrders();
+                            
+                            // 入荷管理タブが開いている場合は統計も更新
+                            if (document.getElementById('receiving-tab').classList.contains('active')) {
+                                loadPurchaseOrderStats();
+                            }
+                        } else {
+                            showToast('エラー: ' + data.error, 'error');
+                        }
+                    } catch (error) {
+                        showToast(`${action}エラー: ` + error, 'error');
+                    }
+                }
+
+            async function updateOrder() {
+                const status = document.getElementById('statusSelect').value;
+                const remarks = document.getElementById('remarksInput').value;
+                const floor = document.getElementById('floorSelect').value;
+                const palletNumber = document.getElementById('palletNumberSelect').value;
+                
+                try {
+                    const response = await fetch(`/api/order/${currentOrderId}/update`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            status: status,
+                            remarks: remarks,
+                            floor: floor,
+                            pallet_number: palletNumber
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        // 🔥 納品完了になった場合はメール送信確認
+                        if (data.show_email_prompt) {
+                            const orderInfo = data.order_info;
+                            
+                            // 確認ダイアログ表示
+                            const confirmMessage = `ステータスを「納品完了」に更新しました。\n\n` +
+                                `製番: ${orderInfo.seiban}\n` +
+                                `品名: ${orderInfo.product_name}\n` +
+                                `場所: ${orderInfo.floor || '未設定'} ${orderInfo.pallet_number || ''}\n\n` +
+                                `納品完了メールを作成しますか？`;
+                            
+                            if (confirm(confirmMessage)) {
+                                // メール作成APIを呼び出し
+                                const emailResponse = await fetch(`/api/order/${currentOrderId}/send-completion-email`, {
+                                    method: 'POST'
+                                });
+                                
+                                const emailData = await emailResponse.json();
+                                
+                                if (emailData.success) {
+                                    showToast('✉️ メーラーを起動しました', 'success');
+                                } else {
+                                    showToast('❌ メーラー起動エラー: ' + emailData.error, 'error');
+                                }
+                            }
+                        } else {
+                            showToast(data.message, 'success');
+                        }
+                        
+                        loadOrders();
+                        closeModal();
+                    } else {
+                        showToast('エラー: ' + data.error, 'error');
+                    }
+                } catch (error) {
+                    showToast('更新エラー: ' + error, 'error');
+                }
+            }
+
+        async function receiveItem(detailId) {
+            try {
+                const response = await fetch(`/api/detail/${detailId}/receive`, {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(data.message);
+                    showOrderDetails(currentOrderId);
+                    loadOrders();
+                } else {
+                    alert('エラー: ' + data.error);
+                }
+            } catch (error) {
+                alert('受入エラー: ' + error);
+            }
+        }
+
+        async function exportOrder(orderId) {
+            window.location.href = `/api/export/${orderId}`;
+        }
+
+        async function deleteOrder(orderId) {
+            if (!confirm('この注文を削除してもよろしいですか？')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/order/${orderId}/delete`, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(data.message);
+                    loadOrders();
+                } else {
+                    alert('エラー: ' + data.error);
+                }
+            } catch (error) {
+                alert('削除エラー: ' + error);
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('detailModal').classList.remove('show');
+        }
+
+        function updateReceivingList(orders) {
+            const receivingList = document.getElementById('receivingList');
+            let html = '<h3>未受入リスト</h3>';
+            
+            orders.forEach(order => {
+                if (order.status !== '納品完了') {
+                    html += `
+                        <div class="order-card" onclick="showOrderDetails(${order.id})">
+                            <p><strong>${order.seiban} - ${order.unit}</strong></p>
+                            <p>進捗: ${order.received_count}/${order.detail_count}</p>
+                            ${order.has_internal_processing ? '<span class="internal-processing-warning">⚠️ 追加工有</span>' : ''}
+                        </div>
+                    `;
+                }
+            });
+            
+            receivingList.innerHTML = html;
+        }
+
+        async function processReceiving() {
+            const qrInput = document.getElementById('qrInput').value;
+            
+            if (!qrInput) {
+                alert('QRコードまたは注文番号を入力してください');
+                return;
+            }
+            
+            // Extract order ID from QR code or direct input
+            let orderId = qrInput;
+            if (qrInput.startsWith('ORDER:')) {
+                orderId = qrInput.replace('ORDER:', '');
+            }
+            
+            showOrderDetails(parseInt(orderId));
+            document.getElementById('qrInput').value = '';
+        }
+
+        async function importHistory(input) {
+            const file = input.files[0];
+            if (!file) return;
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            try {
+                const response = await fetch('/api/import-history', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(data.message);
+                    loadHistoryData();
+                } else {
+                    alert('エラー: ' + data.error);
+                }
+            } catch (error) {
+                alert('インポートエラー: ' + error);
+            }
+        }
+
+    function runBatchFile() {
+        const batPath = "C:\\Users\\t.maruyama\\refresh_order.bat";
+        const infoDiv = document.getElementById("networkFileInfo");
+        infoDiv.textContent = "バッチファイル実行中 ...";
+        fetch('/execute-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: batPath })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if(data.success){
+                infoDiv.innerHTML = `<span style="color:green">バッチファイル実行成功！</span><br>出力:<br><pre>${data.output}</pre>`;
+            } else {
+                infoDiv.innerHTML = `<span style="color:red">失敗: ${data.error}</span>`;
+            }
+        })
+        .catch(error => {
+            console.error(error);
+            infoDiv.innerHTML = "<span style='color:red'>通信エラーで実行できませんでした</span>";
+        });
+    }
+        async function loadHistoryData() {
+            // 履歴データを自動読み込み
+            const historyList = document.getElementById('historyList');
+            historyList.innerHTML = '<div class="loading"><div class="spinner"></div><p>読み込み中...</p></div>';
+            
+            try {
+                const response = await fetch('/api/load-history');
+                const data = await response.json();
+                
+                if (data.success) {
+                    let html = `
+                        <h3>発行履歴 (${data.total}件)</h3>
+                        <div style="max-height: 600px; overflow-y: auto;">
+                            <table class="detail-table">
+                                <thead>
+                                    <tr>
+                                        <th>No.</th>
+                                        <th>発行日</th>
+                                        <th>ファイル名</th>
+                                        <th>製番</th>
+                                        <th>容量(KB)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                    `;
+                    
+                    data.data.forEach(item => {
+                        html += `
+                            <tr>
+                                <td>${item.no}</td>
+                                <td>${item.issue_date}</td>
+                                <td>${item.filename}</td>
+                                <td><strong>${item.seiban}</strong></td>
+                                <td>${item.size_kb}</td>
+                            </tr>
+                        `;
+                    });
+                    
+                    html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                    
+                    historyList.innerHTML = html;
+                } else {
+                    historyList.innerHTML = `
+                        <div class="alert alert-warning">
+                            エラー: ${data.error}<br>
+                            履歴ファイルが読み込めません。ネットワーク接続を確認してください。
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                historyList.innerHTML = `
+                    <div class="alert alert-danger">
+                        読み込みエラー: ${error}<br>
+                        ネットワークファイルにアクセスできません。
+                    </div>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>
