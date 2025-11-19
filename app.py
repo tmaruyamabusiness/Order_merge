@@ -2236,10 +2236,6 @@ def receive_page(order_id):
             <span>{order.status}</span>
         </div>
         <div class="info-row">
-            <span class="label">場所:</span>
-            <span>{order.floor or '未設定'} {order.pallet_number or ''}</span>
-        </div>
-        <div class="info-row">
             <span class="label">品名:</span>
             <span>{order.product_name or ''}</span>
         </div>
@@ -2247,6 +2243,24 @@ def receive_page(order_id):
             <span class="label">得意先:</span>
             <span>{order.customer_abbr or ''}</span>
         </div>
+    </div>
+
+    <!-- 🔥 場所・パレット番号編集セクション -->
+    <div class="info-box" style="background: #e7f3ff; border-left: 4px solid #007bff;">
+        <div style="margin-bottom: 10px; font-weight: bold; color: #004085;">📍 保管場所</div>
+        <div style="margin-bottom: 10px;">
+            <label style="display: block; font-size: 0.9em; color: #666; margin-bottom: 5px;">場所 (例: 1F, 2F)</label>
+            <input type="text" id="floorInput" value="{order.floor or ''}"
+                   style="width: 100%; padding: 10px; border: 1px solid #007bff; border-radius: 5px; font-size: 0.95em;"
+                   placeholder="場所を入力">
+        </div>
+        <div style="margin-bottom: 10px;">
+            <label style="display: block; font-size: 0.9em; color: #666; margin-bottom: 5px;">パレット番号 (例: P001)</label>
+            <input type="text" id="palletInput" value="{order.pallet_number or ''}"
+                   style="width: 100%; padding: 10px; border: 1px solid #007bff; border-radius: 5px; font-size: 0.95em;"
+                   placeholder="パレット番号を入力">
+        </div>
+        <button class="btn btn-primary" onclick="saveLocation()">💾 保管場所を保存</button>
     </div>
 
     <!-- 🔥 備考セクション追加 -->
@@ -2323,19 +2337,46 @@ def receive_page(order_id):
             }}
         }}
         
+        // 保管場所保存関数
+        async function saveLocation() {{
+            const floor = document.getElementById('floorInput').value;
+            const palletNumber = document.getElementById('palletInput').value;
+
+            try {{
+                const response = await fetch('/api/order/{order.id}/update', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        floor: floor,
+                        pallet_number: palletNumber
+                    }})
+                }});
+
+                const data = await response.json();
+
+                if (data.success) {{
+                    showToast('✅ 保管場所を保存しました', 'success');
+                }} else {{
+                    showToast('❌ エラー: ' + data.error, 'error');
+                }}
+            }} catch (error) {{
+                showToast('❌ 保存エラー: ' + error, 'error');
+            }}
+        }}
+
         // 備考保存関数
         async function saveRemarks() {{
             const remarks = document.getElementById('remarksInput').value;
-            
+
             try {{
                 const response = await fetch('/api/order/{order.id}/update-remarks', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify({{ remarks: remarks }})
                 }});
-                
+
                 const data = await response.json();
-                
+
                 if (data.success) {{
                     showToast('✅ 備考を保存しました', 'success');
                 }} else {{
