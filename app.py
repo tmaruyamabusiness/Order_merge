@@ -2249,16 +2249,39 @@ def receive_page(order_id):
     <div class="info-box" style="background: #e7f3ff; border-left: 4px solid #007bff;">
         <div style="margin-bottom: 10px; font-weight: bold; color: #004085;">📍 保管場所</div>
         <div style="margin-bottom: 10px;">
-            <label style="display: block; font-size: 0.9em; color: #666; margin-bottom: 5px;">場所 (例: 1F, 2F)</label>
-            <input type="text" id="floorInput" value="{order.floor or ''}"
-                   style="width: 100%; padding: 10px; border: 1px solid #007bff; border-radius: 5px; font-size: 0.95em;"
-                   placeholder="場所を入力">
+            <label style="display: block; font-size: 0.9em; color: #666; margin-bottom: 5px;">場所</label>
+            <select id="floorInput" style="width: 100%; padding: 10px; border: 1px solid #007bff; border-radius: 5px; font-size: 0.95em;">
+                <option value="">未設定</option>
+                <option value="1F" {'selected' if order.floor == '1F' else ''}>1F</option>
+                <option value="2F" {'selected' if order.floor == '2F' else ''}>2F</option>
+            </select>
         </div>
         <div style="margin-bottom: 10px;">
-            <label style="display: block; font-size: 0.9em; color: #666; margin-bottom: 5px;">パレット番号 (例: P001)</label>
-            <input type="text" id="palletInput" value="{order.pallet_number or ''}"
-                   style="width: 100%; padding: 10px; border: 1px solid #007bff; border-radius: 5px; font-size: 0.95em;"
-                   placeholder="パレット番号を入力">
+            <label style="display: block; font-size: 0.9em; color: #666; margin-bottom: 5px;">パレット（棚）番号</label>
+            <select id="palletInput" style="width: 100%; padding: 10px; border: 1px solid #007bff; border-radius: 5px; font-size: 0.95em;">
+                <option value="">未設定</option>
+                <!-- パレット -->
+                <option value="P001" {'selected' if order.pallet_number == 'P001' else ''}>P001(パレット)</option>
+                <option value="P002" {'selected' if order.pallet_number == 'P002' else ''}>P002(パレット)</option>
+                <option value="P003" {'selected' if order.pallet_number == 'P003' else ''}>P003(パレット)</option>
+                <option value="P004" {'selected' if order.pallet_number == 'P004' else ''}>P004(パレット)</option>
+                <option value="P005" {'selected' if order.pallet_number == 'P005' else ''}>P005(パレット)</option>
+                <option value="P006" {'selected' if order.pallet_number == 'P006' else ''}>P006(パレット)</option>
+                <option value="P007" {'selected' if order.pallet_number == 'P007' else ''}>P007(パレット)</option>
+                <option value="P008" {'selected' if order.pallet_number == 'P008' else ''}>P008(パレット)</option>
+                <option value="P009" {'selected' if order.pallet_number == 'P009' else ''}>P009(パレット)</option>
+                <option value="P010" {'selected' if order.pallet_number == 'P010' else ''}>P010(パレット)</option>
+                <!-- 台車 -->
+                <option value="D001" {'selected' if order.pallet_number == 'D001' else ''}>D001（台車）</option>
+                <option value="D002" {'selected' if order.pallet_number == 'D002' else ''}>D002（台車）</option>
+                <option value="D003" {'selected' if order.pallet_number == 'D003' else ''}>D003（台車）</option>
+                <!-- 棚 -->
+                <option value="T001" {'selected' if order.pallet_number == 'T001' else ''}>T001(棚)</option>
+                <option value="T002" {'selected' if order.pallet_number == 'T002' else ''}>T002(棚)</option>
+                <option value="T003" {'selected' if order.pallet_number == 'T003' else ''}>T003(棚)</option>
+                <option value="T004" {'selected' if order.pallet_number == 'T004' else ''}>T004(棚)</option>
+                <option value="T005" {'selected' if order.pallet_number == 'T005' else ''}>T005(棚)</option>
+            </select>
         </div>
         <button class="btn btn-primary" onclick="saveLocation()">💾 保管場所を保存</button>
     </div>
