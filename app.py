@@ -1984,13 +1984,53 @@ def get_orders():
             })
         
         return jsonify(orders)
-        
+
     except Exception as e:
         import traceback
         print(f"Error getting orders: {str(e)}")
         print(traceback.print_exc())
         return jsonify({'error': str(e)}), 500
-    
+
+@app.route('/api/orders/gantt-data')
+def get_gantt_data():
+    """ガントチャート用に最適化された納期データを一括取得"""
+    try:
+        from sqlalchemy import func
+
+        # 全アクティブ注文と詳細を一度に取得
+        orders = Order.query.filter_by(is_archived=False).all()
+
+        gantt_data = []
+        for order in orders:
+            # 各注文の納期を取得
+            delivery_dates = [
+                d.delivery_date for d in order.details
+                if d.delivery_date and d.delivery_date.strip() and d.delivery_date != '-'
+            ]
+
+            if delivery_dates:
+                # 進捗計算
+                total_details = len(order.details)
+                received_details = sum(1 for d in order.details if d.is_received)
+                progress = (received_details / total_details * 100) if total_details > 0 else 0
+
+                gantt_data.append({
+                    'id': order.id,
+                    'seiban': order.seiban,
+                    'unit': order.unit or 'ユニット名無し',
+                    'status': order.status,
+                    'progress': progress,
+                    'delivery_dates': delivery_dates  # 納期のリスト
+                })
+
+        return jsonify(gantt_data)
+
+    except Exception as e:
+        import traceback
+        print(f"Error getting gantt data: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/archived-orders')
 def get_archived_orders():
     """Get archived orders"""
@@ -2653,7 +2693,10 @@ def get_order_details(order_id):
         order = Order.query.get_or_404(order_id)
         details = []
         for detail in order.details:
-            details.append({
+            # 🔥 CAD図面情報を取得
+            cad_info = get_cad_file_info(detail.spec1)
+
+            detail_dict = {
                 'id': detail.id,
                 'delivery_date': detail.delivery_date,
                 'supplier': detail.supplier,
@@ -2667,8 +2710,22 @@ def get_order_details(order_id):
                 'remarks': detail.remarks,
                 'is_received': detail.is_received,
                 'received_at': detail.received_at.isoformat() if detail.received_at else None,
-                'has_internal_processing': detail.has_internal_processing
-            })
+                'has_internal_processing': detail.has_internal_processing,
+                'parent_id': detail.parent_id  # 🔥 親子関係を追加
+            }
+
+            # 🔥 CAD情報を追加
+            if cad_info:
+                detail_dict['cad_info'] = {
+                    'has_pdf': cad_info['has_pdf'],
+                    'has_mx2': cad_info['has_mx2'],
+                    'pdf_count': len(cad_info['pdf_files']),
+                    'mx2_count': len(cad_info['mx2_files'])
+                }
+            else:
+                detail_dict['cad_info'] = None
+
+            details.append(detail_dict)
         
         return jsonify({
             'order': {

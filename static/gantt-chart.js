@@ -221,126 +221,106 @@ async function handleGanttLabelClick(item) {
     }
 }
 
-// 🔥【修正】updateGanttChart関数内の進捗更新を追加
+// 🔥【最適化版】updateGanttChart関数 - 専用APIで一括取得
 async function updateGanttChart(orders) {
     // ローディング表示を開始
     showGanttLoading(true);
-    updateGanttLoadingProgress(0, 'データを準備中...', '注文情報を取得しています...');
-    
-    // 製番/ユニットごとの納期情報を集計
-    const ganttData = [];
-    
-    console.log('📊 ガントチャート更新開始:', orders.length, '件');
-    
-    // 🔥【追加】進捗カウント用変数
-    const totalOrders = orders.length;
-    let completedOrders = 0;
-    
-    // 全注文の詳細を並行取得
-    const promises = orders.map(async (order) => {
-        try {
-            // ユニット名を先に確認
-            const unitName = order.unit || 'ユニット名無し';
-            console.log(`  処理中: ${order.seiban}_${unitName}`);
-            
-            // 🔥【追加】進捗を更新（データ取得フェーズは0-70%）
-            completedOrders++;
-            const progress = (completedOrders / totalOrders) * 70;
-            updateGanttLoadingProgress(
-                progress,
-                'データ取得中...',
-                `${completedOrders} / ${totalOrders} 件処理済み`
-            );
-            
-            const res = await fetch(`/api/order/${order.id}`);
-            const data = await res.json();
-            
-            console.log(`    詳細取得: ${data.details.length}件`);
-            
-            // 納期を抽出してパース
-            const dates = data.details
-                .map(d => {
-                    // 納期の前処理
-                    const dateStr = (d.delivery_date || '').trim();
-                    if (!dateStr || dateStr === '-') {
-                        return null;
-                    }
-                    return dateStr;
-                })
-                .filter(d => d !== null)
-                .map(d => parseDeliveryDate(d))
-                .filter(d => d && !isNaN(d));
-            
-            console.log(`    ${order.seiban}_${unitName}: 有効な納期${dates.length}件`);
-            
-            if (dates.length > 0) {
-                const minDate = new Date(Math.min(...dates));
-                const maxDate = new Date(Math.max(...dates));
-                
-                console.log(`    ✅ 追加: ${minDate.toLocaleDateString()} ～ ${maxDate.toLocaleDateString()}`);
-                
-                return {
-                    seiban: order.seiban,
-                    label: `${order.seiban}_${unitName}`,
-                    start: minDate,
-                    end: maxDate,
-                    status: order.status,
-                    progress: order.detail_count > 0 ? (order.received_count / order.detail_count) * 100 : 0
-                };
-            } else {
-                console.warn(`    ⚠️ スキップ（納期なし）: ${order.seiban}_${unitName}`);
+    updateGanttLoadingProgress(0, 'データを準備中...', '納期情報を取得しています...');
+
+    console.log('📊 ガントチャート更新開始');
+
+    try {
+        // 🔥【最適化】専用APIで全データを一括取得
+        updateGanttLoadingProgress(20, 'データを取得中...', 'サーバーから納期データを取得...');
+        const res = await fetch('/api/orders/gantt-data');
+        const ganttDataFromAPI = await res.json();
+
+        console.log(`📦 取得したデータ: ${ganttDataFromAPI.length}件`);
+
+        // 🔥【追加】データ処理フェーズ（20-70%）
+        updateGanttLoadingProgress(40, 'データを処理中...', `${ganttDataFromAPI.length}件の納期を解析中...`);
+
+        const validData = [];
+        ganttDataFromAPI.forEach((item, index) => {
+            try {
+                const unitName = item.unit || 'ユニット名無し';
+
+                // 納期を解析
+                const dates = item.delivery_dates
+                    .map(d => parseDeliveryDate(d))
+                    .filter(d => d && !isNaN(d));
+
+                if (dates.length > 0) {
+                    const minDate = new Date(Math.min(...dates));
+                    const maxDate = new Date(Math.max(...dates));
+
+                    validData.push({
+                        seiban: item.seiban,
+                        label: `${item.seiban}_${unitName}`,
+                        start: minDate,
+                        end: maxDate,
+                        status: item.status,
+                        progress: item.progress
+                    });
+                }
+
+                // 進捗更新（40-70%）
+                const progress = 40 + ((index + 1) / ganttDataFromAPI.length) * 30;
+                if (index % 10 === 0) {  // 10件ごとに更新
+                    updateGanttLoadingProgress(
+                        progress,
+                        'データを処理中...',
+                        `${index + 1} / ${ganttDataFromAPI.length} 件処理済み`
+                    );
+                }
+            } catch (error) {
+                console.error(`エラー (${item.seiban}):`, error);
             }
-        } catch (error) {
-            console.error(`エラー (${order.seiban}):`, error);
-        }
-        return null;
-    });
-    
-    // 🔥【追加】データ集計フェーズの進捗表示（70-85%）
-    updateGanttLoadingProgress(70, 'データを集計中...', 'すべてのデータを結合しています...');
-    
-    // 全データ取得を待機
-    const results = await Promise.all(promises);
-    const validData = results.filter(d => d !== null);
-    
-    // 🔥【追加】データ整理フェーズの進捗表示（85%）
-    updateGanttLoadingProgress(85, 'データを整理中...', `${validData.length}件のデータを整理しています...`);
-    
-    console.log('✅ ガントチャートデータ:', validData.length, '件');
-    console.table(validData.map(d => ({
-        ユニット: d.label,
-        最早納期: d.start.toLocaleDateString(),
-        最遅納期: d.end.toLocaleDateString()
-    })));
-    
-    if (validData.length > 0) {
-        allGanttData = validData;
-        
-        // 🔥【追加】製番フィルタUIを初期化（90%）
-        updateGanttLoadingProgress(90, 'フィルタを準備中...', 'フィルタUIを初期化しています...');
-        initializeGanttFilter(validData);
-        
-        // 初回は全て表示
-        if (selectedSeibansForGantt.size === 0) {
-            validData.forEach(d => selectedSeibansForGantt.add(d.seiban));
-        }
-        
-        // 🔥【追加】チャート描画フェーズ（95%）
-        updateGanttLoadingProgress(95, 'チャートを描画中...', 'ガントチャートを生成しています...');
-        renderGanttChart(validData);
-        
-        // 🔥【追加】完了（100%）
-        updateGanttLoadingProgress(100, '完了！', `${validData.length}件のデータを表示しました`);
-        
-        // 🔥【追加】0.5秒後にローディング画面を非表示
-        setTimeout(() => {
+        });
+
+        // 🔥【追加】データ整理フェーズの進捗表示（85%）
+        updateGanttLoadingProgress(85, 'データを整理中...', `${validData.length}件のデータを整理しています...`);
+
+        console.log('✅ ガントチャートデータ:', validData.length, '件');
+        console.table(validData.map(d => ({
+            ユニット: d.label,
+            最早納期: d.start.toLocaleDateString(),
+            最遅納期: d.end.toLocaleDateString()
+        })));
+
+        if (validData.length > 0) {
+            allGanttData = validData;
+
+            // 🔥【追加】製番フィルタUIを初期化（90%）
+            updateGanttLoadingProgress(90, 'フィルタを準備中...', 'フィルタUIを初期化しています...');
+            initializeGanttFilter(validData);
+
+            // 初回は全て表示
+            if (selectedSeibansForGantt.size === 0) {
+                validData.forEach(d => selectedSeibansForGantt.add(d.seiban));
+            }
+
+            // 🔥【追加】チャート描画フェーズ（95%）
+            updateGanttLoadingProgress(95, 'チャートを描画中...', 'ガントチャートを生成しています...');
+            renderGanttChart(validData);
+
+            // 🔥【追加】完了（100%）
+            updateGanttLoadingProgress(100, '完了！', `${validData.length}件のデータを表示しました`);
+
+            // 🔥【追加】0.5秒後にローディング画面を非表示
+            setTimeout(() => {
+                showGanttLoading(false);
+            }, 500);
+        } else {
+            console.warn('⚠️ 表示可能な納期データがありません');
+            document.getElementById('ganttChartContainer').innerHTML =
+                '<p style="text-align: center; padding: 50px; color: #6c757d;">納期データがありません</p>';
+            // 🔥【追加】データがない場合もローディングを非表示
             showGanttLoading(false);
-        }, 500);
-    } else {
-        console.warn('⚠️ 表示可能な納期データがありません');
-        document.getElementById('ganttChartContainer').innerHTML = 
-            '<p style="text-align: center; padding: 50px; color: #6c757d;">納期データがありません</p>';
-        // 🔥【追加】データがない場合もローディングを非表示
+        }
+    } catch (error) {
+        console.error('❌ ガントチャート更新エラー:', error);
+        showToast('ガントチャートの更新に失敗しました: ' + error.message, 'error');
         showGanttLoading(false);
     }
 }
