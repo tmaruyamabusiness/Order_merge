@@ -2323,15 +2323,16 @@ def receive_page(order_id):
                 <option value="T005" {'selected' if order.pallet_number == 'T005' else ''}>T005(棚)</option>
             </select>
         </div>
-        <button class="btn btn-primary" onclick="saveLocation()">💾 保管場所を保存</button>
     </div>
 
     <!-- 🔥 備考セクション追加 -->
     <div class="info-box" style="background: #fff3cd;">
         <div style="margin-bottom: 10px; font-weight: bold; color: #856404;">📝 備考</div>
         <textarea id="remarksInput" style="width: 100%; min-height: 80px; padding: 10px; border: 1px solid #ffc107; border-radius: 5px; font-size: 0.95em; resize: vertical;">{order.remarks or ''}</textarea>
-        <button class="btn btn-success" onclick="saveRemarks()" style="margin-top: 10px;">💾 備考を保存</button>
     </div>
+
+    <!-- 🔥 統合保存ボタン -->
+    <button class="btn btn-primary" onclick="saveAll()" style="width: 100%; padding: 15px; font-size: 1.1em; margin-top: 10px;">💾 保存</button>
     
     <h3 style="margin: 20px 0 10px 5px;">詳細リスト</h3>
     <div id="detailsList">
@@ -2400,10 +2401,11 @@ def receive_page(order_id):
             }}
         }}
         
-        // 保管場所保存関数
-        async function saveLocation() {{
+        // 🔥 統合保存関数（保管場所と備考を一度に保存）
+        async function saveAll() {{
             const floor = document.getElementById('floorInput').value;
             const palletNumber = document.getElementById('palletInput').value;
+            const remarks = document.getElementById('remarksInput').value;
 
             try {{
                 const response = await fetch('/api/order/{order.id}/update', {{
@@ -2411,37 +2413,15 @@ def receive_page(order_id):
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify({{
                         floor: floor,
-                        pallet_number: palletNumber
+                        pallet_number: palletNumber,
+                        remarks: remarks
                     }})
                 }});
 
                 const data = await response.json();
 
                 if (data.success) {{
-                    showToast('✅ 保管場所を保存しました', 'success');
-                }} else {{
-                    showToast('❌ エラー: ' + data.error, 'error');
-                }}
-            }} catch (error) {{
-                showToast('❌ 保存エラー: ' + error, 'error');
-            }}
-        }}
-
-        // 備考保存関数
-        async function saveRemarks() {{
-            const remarks = document.getElementById('remarksInput').value;
-
-            try {{
-                const response = await fetch('/api/order/{order.id}/update-remarks', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ remarks: remarks }})
-                }});
-
-                const data = await response.json();
-
-                if (data.success) {{
-                    showToast('✅ 備考を保存しました', 'success');
+                    showToast('✅ 保存しました', 'success');
                 }} else {{
                     showToast('❌ エラー: ' + data.error, 'error');
                 }}
