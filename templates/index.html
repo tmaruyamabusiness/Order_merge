@@ -1397,11 +1397,21 @@
         async function loadArchivedOrders() {
             try {
                 const response = await fetch('/api/archived-orders');
+                if (!response.ok) {
+                    console.error('Failed to load archived orders:', response.status);
+                    return;
+                }
                 const orders = await response.json();
-                
+
+                // 配列でない場合はエラー処理
+                if (!Array.isArray(orders)) {
+                    console.error('Invalid archived orders response:', orders);
+                    return;
+                }
+
                 const archiveGrid = document.getElementById('archiveGrid');
                 archiveGrid.innerHTML = '';
-                
+
                 if (orders.length === 0) {
                     archiveGrid.innerHTML = '<p>アーカイブされた注文はありません</p>';
                     return;
@@ -1665,8 +1675,18 @@
         async function loadOrders() {
             try {
                 const response = await fetch('/api/orders');
+                if (!response.ok) {
+                    console.error('Failed to load orders:', response.status);
+                    return;
+                }
                 const orders = await response.json();
-                
+
+                // 配列でない場合はエラー処理
+                if (!Array.isArray(orders)) {
+                    console.error('Invalid orders response:', orders);
+                    return;
+                }
+
                 // 製番でグループ化
                 const groupedBySeiban = {};
                 orders.forEach(order => {
@@ -2313,7 +2333,14 @@
         function updateReceivingList(orders) {
             const receivingList = document.getElementById('receivingList');
             let html = '<h3>未受入リスト</h3>';
-            
+
+            // 配列でない場合は早期リターン
+            if (!Array.isArray(orders)) {
+                console.error('Invalid orders for receiving list:', orders);
+                receivingList.innerHTML = html;
+                return;
+            }
+
             orders.forEach(order => {
                 if (order.status !== '納品完了') {
                     html += `
