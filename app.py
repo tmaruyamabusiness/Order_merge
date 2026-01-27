@@ -2333,6 +2333,33 @@ def receive_page(order_id):
         <textarea id="remarksInput" style="width: 100%; min-height: 80px; padding: 10px; border: 1px solid #ffc107; border-radius: 5px; font-size: 0.95em; resize: vertical;">{order.remarks or ''}</textarea>
     </div>
 
+    <!-- 📷 画像セクション -->
+    <div class="info-box" style="background: #e8f5e9; border-left: 4px solid #4caf50;">
+        <div style="margin-bottom: 10px; font-weight: bold; color: #2e7d32;">📷 画像</div>
+        <div id="imagePreviewArea" style="margin: 10px 0; text-align: center;">
+            <img id="orderImage" src="/api/order/{order.id}/image"
+                 style="max-width: 100%; max-height: 250px; border-radius: 8px; display: none; cursor: pointer;"
+                 onclick="openImageFullscreen(this.src)"
+                 onerror="this.style.display='none'; document.getElementById('noImageText').style.display='block';"
+                 onload="this.style.display='block'; document.getElementById('noImageText').style.display='none';">
+            <p id="noImageText" style="color: #888; font-style: italic;">画像なし</p>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <label style="flex: 1; min-width: 120px;">
+                <div class="btn btn-primary" style="text-align: center; margin: 0;">📤 ファイル選択</div>
+                <input type="file" id="imageUploadFile" accept="image/*"
+                       style="display: none;" onchange="uploadOrderImage({order.id})">
+            </label>
+            <label style="flex: 1; min-width: 120px;">
+                <div class="btn btn-success" style="text-align: center; margin: 0;">📸 カメラ撮影</div>
+                <input type="file" id="imageUploadCamera" accept="image/*" capture="environment"
+                       style="display: none;" onchange="uploadOrderImageFromCamera({order.id})">
+            </label>
+        </div>
+        <button class="btn" style="background: #dc3545; color: white; margin-top: 8px;" onclick="deleteOrderImage({order.id})">🗑️ 画像を削除</button>
+        <p style="font-size: 0.75em; color: #666; margin-top: 8px; text-align: center;">※FullHD (1920x1080) に自動圧縮されます</p>
+    </div>
+
     <!-- 🔥 統合保存ボタン -->
     <button class="btn btn-primary" onclick="saveAll()" style="width: 100%; padding: 15px; font-size: 1.1em; margin-top: 10px;">💾 保存</button>
     
@@ -2471,7 +2498,7 @@ def receive_page(order_id):
             type = type || 'success';
             const toast = document.getElementById('toast');
             toast.textContent = message;
-            
+
             if (type === 'error') {{
                 toast.style.background = '#dc3545';
             }} else if (type === 'info') {{
@@ -2479,11 +2506,105 @@ def receive_page(order_id):
             }} else {{
                 toast.style.background = '#28a745';
             }}
-            
+
             toast.classList.add('show');
             setTimeout(function() {{
                 toast.classList.remove('show');
             }}, 3000);
+        }}
+
+        // 📷 画像アップロード（ファイル選択）
+        async function uploadOrderImage(orderId) {{
+            const fileInput = document.getElementById('imageUploadFile');
+            await processImageUpload(orderId, fileInput);
+        }}
+
+        // 📸 画像アップロード（カメラ撮影）
+        async function uploadOrderImageFromCamera(orderId) {{
+            const fileInput = document.getElementById('imageUploadCamera');
+            await processImageUpload(orderId, fileInput);
+        }}
+
+        // 画像アップロード処理
+        async function processImageUpload(orderId, fileInput) {{
+            const file = fileInput.files[0];
+
+            if (!file) {{
+                return;
+            }}
+
+            showToast('📤 アップロード中...', 'info');
+
+            const formData = new FormData();
+            formData.append('image', file);
+
+            try {{
+                const response = await fetch('/api/order/' + orderId + '/upload-image', {{
+                    method: 'POST',
+                    body: formData
+                }});
+
+                const data = await response.json();
+
+                if (data.success) {{
+                    showToast('✅ 画像をアップロードしました', 'success');
+                    // 画像を再読み込み
+                    const img = document.getElementById('orderImage');
+                    img.src = '/api/order/' + orderId + '/image?t=' + Date.now();
+                }} else {{
+                    showToast('❌ エラー: ' + data.error, 'error');
+                }}
+            }} catch (error) {{
+                showToast('❌ アップロードエラー: ' + error, 'error');
+            }}
+
+            // ファイル選択をリセット
+            fileInput.value = '';
+        }}
+
+        // 🗑️ 画像削除
+        async function deleteOrderImage(orderId) {{
+            if (!confirm('画像を削除しますか？')) {{
+                return;
+            }}
+
+            try {{
+                const response = await fetch('/api/order/' + orderId + '/delete-image', {{
+                    method: 'DELETE'
+                }});
+
+                const data = await response.json();
+
+                if (data.success) {{
+                    showToast('✅ 画像を削除しました', 'success');
+                    document.getElementById('orderImage').style.display = 'none';
+                    document.getElementById('noImageText').style.display = 'block';
+                }} else {{
+                    showToast('❌ エラー: ' + data.error, 'error');
+                }}
+            }} catch (error) {{
+                showToast('❌ 削除エラー: ' + error, 'error');
+            }}
+        }}
+
+        // 🔍 画像をフルスクリーンで表示
+        function openImageFullscreen(src) {{
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); display: flex; justify-content: center; align-items: center; z-index: 10000; cursor: pointer;';
+
+            const img = document.createElement('img');
+            img.src = src;
+            img.style.cssText = 'max-width: 95%; max-height: 95%; object-fit: contain;';
+
+            const closeBtn = document.createElement('div');
+            closeBtn.innerHTML = '✕';
+            closeBtn.style.cssText = 'position: absolute; top: 15px; right: 20px; color: white; font-size: 2em; cursor: pointer;';
+            closeBtn.onclick = function() {{ overlay.remove(); }};
+
+            overlay.appendChild(img);
+            overlay.appendChild(closeBtn);
+            overlay.onclick = function(e) {{ if (e.target === overlay) overlay.remove(); }};
+            document.body.appendChild(overlay);
         }}
     </script>
 </body>
