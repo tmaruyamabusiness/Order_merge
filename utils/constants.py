@@ -12,8 +12,8 @@ class Constants:
         r'/Ni-P', r'/NiCr', r'／Ni-P', r'／NiCr',
         r'Ｎｉ－Ｐ', r'Ｃｒ', r'ＮｉＣｒ'
     ]
-    # 仕入先に関係なくメッキ出となる品目CD
-    MEKKI_ITEM_CODES = ['NMA-00017-00-00']
+    # 仕入先に関係なくメッキ出となる仕様１パターン
+    MEKKI_SPEC1_CODES = ['NMA-00017-00-00']
     MEKKI_ALERT_TEXT = '⚠️メッキ出'
     
     # 手配区分CD

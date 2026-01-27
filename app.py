@@ -1286,9 +1286,9 @@ def _write_detail_row(ws, detail, row_idx, is_parent=True):
     """詳細行を出力"""
     is_blank = '加工用ブランク' in str(detail.order_type)
     supplier_cd = getattr(detail, 'supplier_cd', None)
+    spec1_value = detail.spec1 or ''
     spec2_value = detail.spec2 or ''
-    item_code = getattr(detail, 'item_code', None)
-    is_mekki = MekkiUtils.is_mekki_target(supplier_cd, spec2_value, item_code)
+    is_mekki = MekkiUtils.is_mekki_target(supplier_cd, spec2_value, spec1_value)
     
     remarks = MekkiUtils.add_mekki_alert(detail.remarks) if is_mekki else (detail.remarks or '')
     
