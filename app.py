@@ -37,6 +37,7 @@ from flask_cors import CORS
 from openpyxl.worksheet.page import PageMargins
 from openpyxl.chart import BarChart, Reference
 import glob
+from PIL import Image
 from utils import Constants, DataUtils, MekkiUtils, ExcelStyler, generate_qr_code, create_gantt_chart_sheet, EmailSender        
 
 app = Flask(__name__)
@@ -99,6 +100,7 @@ class Order(db.Model):
     memo2 = db.Column(db.String(200))
     pallet_number = db.Column(db.String(50))  # ← 追加
     floor = db.Column(db.String(10))  # ← 追加
+    image_path = db.Column(db.String(500))  # 画像パス
     is_archived = db.Column(db.Boolean, default=False)
     archived_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
@@ -2331,6 +2333,33 @@ def receive_page(order_id):
         <textarea id="remarksInput" style="width: 100%; min-height: 80px; padding: 10px; border: 1px solid #ffc107; border-radius: 5px; font-size: 0.95em; resize: vertical;">{order.remarks or ''}</textarea>
     </div>
 
+    <!-- 📷 画像セクション -->
+    <div class="info-box" style="background: #e8f5e9; border-left: 4px solid #4caf50;">
+        <div style="margin-bottom: 10px; font-weight: bold; color: #2e7d32;">📷 画像</div>
+        <div id="imagePreviewArea" style="margin: 10px 0; text-align: center;">
+            <img id="orderImage" src="/api/order/{order.id}/image"
+                 style="max-width: 100%; max-height: 250px; border-radius: 8px; display: none; cursor: pointer;"
+                 onclick="openImageFullscreen(this.src)"
+                 onerror="this.style.display='none'; document.getElementById('noImageText').style.display='block';"
+                 onload="this.style.display='block'; document.getElementById('noImageText').style.display='none';">
+            <p id="noImageText" style="color: #888; font-style: italic;">画像なし</p>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <label style="flex: 1; min-width: 120px;">
+                <div class="btn btn-primary" style="text-align: center; margin: 0;">📤 ファイル選択</div>
+                <input type="file" id="imageUploadFile" accept="image/*"
+                       style="display: none;" onchange="uploadOrderImage({order.id})">
+            </label>
+            <label style="flex: 1; min-width: 120px;">
+                <div class="btn btn-success" style="text-align: center; margin: 0;">📸 カメラ撮影</div>
+                <input type="file" id="imageUploadCamera" accept="image/*" capture="environment"
+                       style="display: none;" onchange="uploadOrderImageFromCamera({order.id})">
+            </label>
+        </div>
+        <button class="btn" style="background: #dc3545; color: white; margin-top: 8px;" onclick="deleteOrderImage({order.id})">🗑️ 画像を削除</button>
+        <p style="font-size: 0.75em; color: #666; margin-top: 8px; text-align: center;">※FullHD (1920x1080) に自動圧縮されます</p>
+    </div>
+
     <!-- 🔥 統合保存ボタン -->
     <button class="btn btn-primary" onclick="saveAll()" style="width: 100%; padding: 15px; font-size: 1.1em; margin-top: 10px;">💾 保存</button>
     
@@ -2469,7 +2498,7 @@ def receive_page(order_id):
             type = type || 'success';
             const toast = document.getElementById('toast');
             toast.textContent = message;
-            
+
             if (type === 'error') {{
                 toast.style.background = '#dc3545';
             }} else if (type === 'info') {{
@@ -2477,11 +2506,105 @@ def receive_page(order_id):
             }} else {{
                 toast.style.background = '#28a745';
             }}
-            
+
             toast.classList.add('show');
             setTimeout(function() {{
                 toast.classList.remove('show');
             }}, 3000);
+        }}
+
+        // 📷 画像アップロード（ファイル選択）
+        async function uploadOrderImage(orderId) {{
+            const fileInput = document.getElementById('imageUploadFile');
+            await processImageUpload(orderId, fileInput);
+        }}
+
+        // 📸 画像アップロード（カメラ撮影）
+        async function uploadOrderImageFromCamera(orderId) {{
+            const fileInput = document.getElementById('imageUploadCamera');
+            await processImageUpload(orderId, fileInput);
+        }}
+
+        // 画像アップロード処理
+        async function processImageUpload(orderId, fileInput) {{
+            const file = fileInput.files[0];
+
+            if (!file) {{
+                return;
+            }}
+
+            showToast('📤 アップロード中...', 'info');
+
+            const formData = new FormData();
+            formData.append('image', file);
+
+            try {{
+                const response = await fetch('/api/order/' + orderId + '/upload-image', {{
+                    method: 'POST',
+                    body: formData
+                }});
+
+                const data = await response.json();
+
+                if (data.success) {{
+                    showToast('✅ 画像をアップロードしました', 'success');
+                    // 画像を再読み込み
+                    const img = document.getElementById('orderImage');
+                    img.src = '/api/order/' + orderId + '/image?t=' + Date.now();
+                }} else {{
+                    showToast('❌ エラー: ' + data.error, 'error');
+                }}
+            }} catch (error) {{
+                showToast('❌ アップロードエラー: ' + error, 'error');
+            }}
+
+            // ファイル選択をリセット
+            fileInput.value = '';
+        }}
+
+        // 🗑️ 画像削除
+        async function deleteOrderImage(orderId) {{
+            if (!confirm('画像を削除しますか？')) {{
+                return;
+            }}
+
+            try {{
+                const response = await fetch('/api/order/' + orderId + '/delete-image', {{
+                    method: 'DELETE'
+                }});
+
+                const data = await response.json();
+
+                if (data.success) {{
+                    showToast('✅ 画像を削除しました', 'success');
+                    document.getElementById('orderImage').style.display = 'none';
+                    document.getElementById('noImageText').style.display = 'block';
+                }} else {{
+                    showToast('❌ エラー: ' + data.error, 'error');
+                }}
+            }} catch (error) {{
+                showToast('❌ 削除エラー: ' + error, 'error');
+            }}
+        }}
+
+        // 🔍 画像をフルスクリーンで表示
+        function openImageFullscreen(src) {{
+            const overlay = document.createElement('div');
+            overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); display: flex; justify-content: center; align-items: center; z-index: 10000; cursor: pointer;';
+
+            const img = document.createElement('img');
+            img.src = src;
+            img.style.cssText = 'max-width: 95%; max-height: 95%; object-fit: contain;';
+
+            const closeBtn = document.createElement('div');
+            closeBtn.innerHTML = '✕';
+            closeBtn.style.cssText = 'position: absolute; top: 15px; right: 20px; color: white; font-size: 2em; cursor: pointer;';
+            closeBtn.onclick = function() {{ overlay.remove(); }};
+
+            overlay.appendChild(img);
+            overlay.appendChild(closeBtn);
+            overlay.onclick = function(e) {{ if (e.target === overlay) overlay.remove(); }};
+            document.body.appendChild(overlay);
         }}
     </script>
 </body>
@@ -3806,7 +3929,170 @@ def open_cad_file(detail_id):
             'success': False,
             'error': str(e)
         }), 500
-    
+
+
+# ==================== 画像アップロード/表示機能 ====================
+
+# 画像保存ディレクトリ
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'images')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# FullHD解像度
+FULLHD_WIDTH = 1920
+FULLHD_HEIGHT = 1080
+
+
+def compress_to_fullhd(image_data):
+    """画像をFullHD（1920x1080）以下に圧縮"""
+    img = Image.open(io.BytesIO(image_data))
+
+    # EXIF情報に基づいて回転を修正
+    try:
+        from PIL import ExifTags
+        for orientation in ExifTags.TAGS.keys():
+            if ExifTags.TAGS[orientation] == 'Orientation':
+                break
+        exif = img._getexif()
+        if exif is not None:
+            orientation_value = exif.get(orientation)
+            if orientation_value == 3:
+                img = img.rotate(180, expand=True)
+            elif orientation_value == 6:
+                img = img.rotate(270, expand=True)
+            elif orientation_value == 8:
+                img = img.rotate(90, expand=True)
+    except (AttributeError, KeyError, IndexError):
+        pass
+
+    # 元のサイズ
+    original_width, original_height = img.size
+
+    # リサイズが必要かチェック
+    if original_width <= FULLHD_WIDTH and original_height <= FULLHD_HEIGHT:
+        # リサイズ不要、でもJPEGに変換して圧縮
+        output = io.BytesIO()
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+        img.save(output, format='JPEG', quality=85, optimize=True)
+        return output.getvalue()
+
+    # アスペクト比を維持してリサイズ
+    ratio = min(FULLHD_WIDTH / original_width, FULLHD_HEIGHT / original_height)
+    new_width = int(original_width * ratio)
+    new_height = int(original_height * ratio)
+
+    # リサイズ
+    img = img.resize((new_width, new_height), Image.LANCZOS)
+
+    # JPEG形式で保存
+    output = io.BytesIO()
+    if img.mode in ('RGBA', 'P'):
+        img = img.convert('RGB')
+    img.save(output, format='JPEG', quality=85, optimize=True)
+
+    return output.getvalue()
+
+
+@app.route('/api/order/<int:order_id>/upload-image', methods=['POST'])
+def upload_order_image(order_id):
+    """注文に画像をアップロード（FullHD圧縮）"""
+    try:
+        order = Order.query.get(order_id)
+        if not order:
+            return jsonify({'success': False, 'error': '注文が見つかりません'}), 404
+
+        if 'image' not in request.files:
+            return jsonify({'success': False, 'error': '画像ファイルがありません'}), 400
+
+        file = request.files['image']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'ファイルが選択されていません'}), 400
+
+        # 拡張子チェック
+        allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+        ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+        if ext not in allowed_extensions:
+            return jsonify({'success': False, 'error': '許可されていないファイル形式です'}), 400
+
+        # 画像データを読み込み
+        image_data = file.read()
+
+        # FullHDに圧縮
+        compressed_data = compress_to_fullhd(image_data)
+
+        # ファイル名を生成（order_id + タイムスタンプ）
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"order_{order_id}_{timestamp}.jpg"
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+
+        # 古い画像があれば削除
+        if order.image_path and os.path.exists(order.image_path):
+            try:
+                os.remove(order.image_path)
+            except:
+                pass
+
+        # 保存
+        with open(filepath, 'wb') as f:
+            f.write(compressed_data)
+
+        # DBに保存
+        order.image_path = filepath
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': '画像をアップロードしました',
+            'image_url': f'/api/order/{order_id}/image'
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/order/<int:order_id>/image')
+def get_order_image(order_id):
+    """注文の画像を取得"""
+    try:
+        order = Order.query.get(order_id)
+        if not order:
+            return jsonify({'error': '注文が見つかりません'}), 404
+
+        if not order.image_path or not os.path.exists(order.image_path):
+            return jsonify({'error': '画像がありません'}), 404
+
+        return send_file(
+            order.image_path,
+            mimetype='image/jpeg'
+        )
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/order/<int:order_id>/delete-image', methods=['DELETE'])
+def delete_order_image(order_id):
+    """注文の画像を削除"""
+    try:
+        order = Order.query.get(order_id)
+        if not order:
+            return jsonify({'success': False, 'error': '注文が見つかりません'}), 404
+
+        if order.image_path and os.path.exists(order.image_path):
+            try:
+                os.remove(order.image_path)
+            except:
+                pass
+
+        order.image_path = None
+        db.session.commit()
+
+        return jsonify({'success': True, 'message': '画像を削除しました'})
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 if __name__ == '__main__':
 
     # 設定を取得
