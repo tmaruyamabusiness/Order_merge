@@ -38,7 +38,7 @@ from openpyxl.worksheet.page import PageMargins
 from openpyxl.chart import BarChart, Reference
 import glob
 from PIL import Image
-from utils import Constants, DataUtils, MekkiUtils, ExcelStyler, generate_qr_code, create_gantt_chart_sheet, EmailSender        
+from utils import Constants, DataUtils, MekkiUtils, ExcelStyler, generate_qr_code, create_gantt_chart_sheet, EmailSender, DeliveryUtils        
 
 app = Flask(__name__)
 
@@ -1079,17 +1079,17 @@ def create_order_sheet(ws, order, sheet_name=None):
         img.width = 100
         img.height = 100
         
-        # 🔥 QRコードをH1セルに配置
-        ws.add_image(img, 'I1')
-        
-        # 🔥 URLテキストとラベルをJ列に配置（QRコードの右側）
-        ws['K1'] = '💻️ 受入確認専用ページ'
-        ws['K1'].font = Font(size=9, bold=True)
-        ws['K1'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+        # 🔥 QRコードをK1セルに配置（2列追加に対応）
+        ws.add_image(img, 'K1')
 
-        ws['K2'] = receive_url
-        ws['K2'].font = Font(size=8, color='0000FF', underline='single')
-        ws['K2'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+        # 🔥 URLテキストとラベルをM列に配置（QRコードの右側）
+        ws['M1'] = '💻️ 受入確認専用ページ(社内LANよりアクセス)'
+        ws['M1'].font = Font(size=9, bold=True)
+        ws['M1'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+
+        ws['M2'] = receive_url
+        ws['M2'].font = Font(size=8, color='0000FF', underline='single')
+        ws['M2'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
         
     except Exception as e:
         print(f"⚠️ QRコード生成エラー: {e}")
@@ -1138,33 +1138,38 @@ def create_order_sheet(ws, order, sheet_name=None):
     
     # 🔥 列幅設定（縦向き印刷用に最適化）
     column_widths = {
-        'A': 9,   # 納期
-        'B': 11,  # 仕入先略称
-        'C': 9,   # 発注番号
-        'D': 5,   # 手配数
-        'E': 4,   # 単位
-        'F': 18,  # 品名
-        'G': 15,  # 仕様１
-        'H': 12,  # 仕様２
-        'I': 10,  # 手配区分
-        'J': 8,   # メーカー
-        'K': 12   # 備考
+        'A': 9,   # 納入日（新規）
+        'B': 6,   # 納入数（新規）
+        'C': 9,   # 納期
+        'D': 11,  # 仕入先略称
+        'E': 9,   # 発注番号
+        'F': 5,   # 手配数
+        'G': 4,   # 単位
+        'H': 18,  # 品名
+        'I': 15,  # 仕様１
+        'J': 12,  # 仕様２
+        'K': 10,  # 手配区分
+        'L': 8,   # メーカー
+        'M': 12   # 備考
     }
-    
+
     for col_letter, width in column_widths.items():
         ws.column_dimensions[col_letter].width = width
-    
+
+    # 🔥 検収データを読み込み
+    delivery_dict = DeliveryUtils.load_delivery_data()
+
     # 🔥 データ行を書き込む（7行目から開始）
     row_idx = 7
     parent_details = [d for d in order.details if d.parent_id is None]
-    
+
     for detail in parent_details:
-        row_idx = _write_detail_row(ws, detail, row_idx, is_parent=True)
-        
+        row_idx = _write_detail_row(ws, detail, row_idx, is_parent=True, delivery_dict=delivery_dict)
+
         # 子アイテム
         children = [d for d in order.details if d.parent_id == detail.id]
         for child in children:
-            row_idx = _write_detail_row(ws, child, row_idx, is_parent=False)
+            row_idx = _write_detail_row(ws, child, row_idx, is_parent=False, delivery_dict=delivery_dict)
     
     # 🔥 ページ設定（縦向き印刷）
     ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
@@ -1185,7 +1190,7 @@ def create_order_sheet(ws, order, sheet_name=None):
     
     # 🔥 印刷タイトル行（ヘッダーを毎ページ印刷）
     ws.print_title_rows = '1:6'
-    ws.print_area = f'A1:K{row_idx - 1}'
+    ws.print_area = f'A1:M{row_idx - 1}'
     
     # 🔥 フッター設定（フォントサイズ10に縮小）
     footer_parts = []
@@ -1270,57 +1275,68 @@ def _create_data_rows(ws, order):
     """データ行作成"""
     row_idx = 4
     parent_details = [d for d in order.details if d.parent_id is None]
-    
+
+    # 検収データを読み込み
+    delivery_dict = DeliveryUtils.load_delivery_data()
+
     for detail in parent_details:
-        row_idx = _write_detail_row(ws, detail, row_idx, is_parent=True)
-        
+        row_idx = _write_detail_row(ws, detail, row_idx, is_parent=True, delivery_dict=delivery_dict)
+
         # 子アイテム
         children = [d for d in order.details if d.parent_id == detail.id]
         for child in children:
-            row_idx = _write_detail_row(ws, child, row_idx, is_parent=False)
-    
+            row_idx = _write_detail_row(ws, child, row_idx, is_parent=False, delivery_dict=delivery_dict)
+
     return row_idx
 
 
-def _write_detail_row(ws, detail, row_idx, is_parent=True):
+def _write_detail_row(ws, detail, row_idx, is_parent=True, delivery_dict=None):
     """詳細行を出力"""
     is_blank = '加工用ブランク' in str(detail.order_type)
     supplier_cd = getattr(detail, 'supplier_cd', None)
     spec1_value = detail.spec1 or ''
     spec2_value = detail.spec2 or ''
     is_mekki = MekkiUtils.is_mekki_target(supplier_cd, spec2_value, spec1_value)
-    
+
     remarks = MekkiUtils.add_mekki_alert(detail.remarks) if is_mekki else (detail.remarks or '')
-    
+
+    # 検収データから納入日・納入数を取得
+    delivery_info = DeliveryUtils.get_delivery_info(detail.order_number, delivery_dict)
+    delivery_date = delivery_info.get('納入日', '')
+    delivery_qty = delivery_info.get('納入数', 0)
+    # 納入数が0の場合は空欄表示
+    delivery_qty_display = delivery_qty if delivery_qty > 0 else ''
+
     data = [
+        delivery_date, delivery_qty_display,  # 納入日, 納入数（新規追加）
         detail.delivery_date, detail.supplier, detail.order_number,
         detail.quantity, detail.unit_measure, detail.item_name,
         detail.spec1, spec2_value, detail.order_type, detail.maker, remarks
     ]
-    
+
     row_fill = ExcelStyler.get_fill(detail.is_received, row_idx % 2 == 0, not is_parent)
     cell_font = ExcelStyler.get_font(is_blank, False)
-    
+
     for col, value in enumerate(data, 1):
         cell = ws.cell(row=row_idx, column=col, value=value)
         cell.fill = row_fill
         cell.alignment = Alignment(vertical='center')
-        
-        if col == 8 and is_mekki:
+
+        if col == 10 and is_mekki:  # 仕様２のカラムがJ(10)に変更
             cell.font = ExcelStyler.get_font(False, True)
         elif cell_font:
             cell.font = cell_font
-        
-        if col == 6 and not is_parent:
+
+        if col == 8 and not is_parent:  # 品名のカラムがH(8)に変更
             cell.value = f"  └ {value}"
-    
+
     ws.row_dimensions[row_idx].height = 27
     return row_idx + 1
 
 def _setup_print_settings(ws, row_idx, order, unit_display, customer, memo):
     """印刷設定"""
     ws.print_title_rows = '1:3'
-    ws.print_area = f'A1:K{row_idx - 1}'
+    ws.print_area = f'A1:M{row_idx - 1}'
     
     footer_parts = [order.seiban]
     if unit_display:
