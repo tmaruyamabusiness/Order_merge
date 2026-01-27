@@ -37,6 +37,7 @@ from flask_cors import CORS
 from openpyxl.worksheet.page import PageMargins
 from openpyxl.chart import BarChart, Reference
 import glob
+from PIL import Image
 from utils import Constants, DataUtils, MekkiUtils, ExcelStyler, generate_qr_code, create_gantt_chart_sheet, EmailSender        
 
 app = Flask(__name__)
@@ -99,6 +100,7 @@ class Order(db.Model):
     memo2 = db.Column(db.String(200))
     pallet_number = db.Column(db.String(50))  # ← 追加
     floor = db.Column(db.String(10))  # ← 追加
+    image_path = db.Column(db.String(500))  # 画像パス
     is_archived = db.Column(db.Boolean, default=False)
     archived_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
@@ -3806,7 +3808,170 @@ def open_cad_file(detail_id):
             'success': False,
             'error': str(e)
         }), 500
-    
+
+
+# ==================== 画像アップロード/表示機能 ====================
+
+# 画像保存ディレクトリ
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'images')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# FullHD解像度
+FULLHD_WIDTH = 1920
+FULLHD_HEIGHT = 1080
+
+
+def compress_to_fullhd(image_data):
+    """画像をFullHD（1920x1080）以下に圧縮"""
+    img = Image.open(io.BytesIO(image_data))
+
+    # EXIF情報に基づいて回転を修正
+    try:
+        from PIL import ExifTags
+        for orientation in ExifTags.TAGS.keys():
+            if ExifTags.TAGS[orientation] == 'Orientation':
+                break
+        exif = img._getexif()
+        if exif is not None:
+            orientation_value = exif.get(orientation)
+            if orientation_value == 3:
+                img = img.rotate(180, expand=True)
+            elif orientation_value == 6:
+                img = img.rotate(270, expand=True)
+            elif orientation_value == 8:
+                img = img.rotate(90, expand=True)
+    except (AttributeError, KeyError, IndexError):
+        pass
+
+    # 元のサイズ
+    original_width, original_height = img.size
+
+    # リサイズが必要かチェック
+    if original_width <= FULLHD_WIDTH and original_height <= FULLHD_HEIGHT:
+        # リサイズ不要、でもJPEGに変換して圧縮
+        output = io.BytesIO()
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+        img.save(output, format='JPEG', quality=85, optimize=True)
+        return output.getvalue()
+
+    # アスペクト比を維持してリサイズ
+    ratio = min(FULLHD_WIDTH / original_width, FULLHD_HEIGHT / original_height)
+    new_width = int(original_width * ratio)
+    new_height = int(original_height * ratio)
+
+    # リサイズ
+    img = img.resize((new_width, new_height), Image.LANCZOS)
+
+    # JPEG形式で保存
+    output = io.BytesIO()
+    if img.mode in ('RGBA', 'P'):
+        img = img.convert('RGB')
+    img.save(output, format='JPEG', quality=85, optimize=True)
+
+    return output.getvalue()
+
+
+@app.route('/api/order/<int:order_id>/upload-image', methods=['POST'])
+def upload_order_image(order_id):
+    """注文に画像をアップロード（FullHD圧縮）"""
+    try:
+        order = Order.query.get(order_id)
+        if not order:
+            return jsonify({'success': False, 'error': '注文が見つかりません'}), 404
+
+        if 'image' not in request.files:
+            return jsonify({'success': False, 'error': '画像ファイルがありません'}), 400
+
+        file = request.files['image']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': 'ファイルが選択されていません'}), 400
+
+        # 拡張子チェック
+        allowed_extensions = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+        ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+        if ext not in allowed_extensions:
+            return jsonify({'success': False, 'error': '許可されていないファイル形式です'}), 400
+
+        # 画像データを読み込み
+        image_data = file.read()
+
+        # FullHDに圧縮
+        compressed_data = compress_to_fullhd(image_data)
+
+        # ファイル名を生成（order_id + タイムスタンプ）
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"order_{order_id}_{timestamp}.jpg"
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+
+        # 古い画像があれば削除
+        if order.image_path and os.path.exists(order.image_path):
+            try:
+                os.remove(order.image_path)
+            except:
+                pass
+
+        # 保存
+        with open(filepath, 'wb') as f:
+            f.write(compressed_data)
+
+        # DBに保存
+        order.image_path = filepath
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': '画像をアップロードしました',
+            'image_url': f'/api/order/{order_id}/image'
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/order/<int:order_id>/image')
+def get_order_image(order_id):
+    """注文の画像を取得"""
+    try:
+        order = Order.query.get(order_id)
+        if not order:
+            return jsonify({'error': '注文が見つかりません'}), 404
+
+        if not order.image_path or not os.path.exists(order.image_path):
+            return jsonify({'error': '画像がありません'}), 404
+
+        return send_file(
+            order.image_path,
+            mimetype='image/jpeg'
+        )
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/order/<int:order_id>/delete-image', methods=['DELETE'])
+def delete_order_image(order_id):
+    """注文の画像を削除"""
+    try:
+        order = Order.query.get(order_id)
+        if not order:
+            return jsonify({'success': False, 'error': '注文が見つかりません'}), 404
+
+        if order.image_path and os.path.exists(order.image_path):
+            try:
+                os.remove(order.image_path)
+            except:
+                pass
+
+        order.image_path = None
+        db.session.commit()
+
+        return jsonify({'success': True, 'message': '画像を削除しました'})
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 if __name__ == '__main__':
 
     # 設定を取得
