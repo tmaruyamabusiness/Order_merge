@@ -10,8 +10,10 @@ class Constants:
     MEKKI_SUPPLIER_CD = 116
     MEKKI_PATTERNS = [
         r'/Ni-P', r'/NiCr', r'／Ni-P', r'／NiCr',
-        r'Ｎｉ－Ｐ', r'Ｃｒ', r'ＮｉＣｒ' 
+        r'Ｎｉ－Ｐ', r'Ｃｒ', r'ＮｉＣｒ'
     ]
+    # 仕入先に関係なくメッキ出となる品目CD
+    MEKKI_ITEM_CODES = ['NMA-00017-00-00']
     MEKKI_ALERT_TEXT = '⚠️メッキ出'
     
     # 手配区分CD

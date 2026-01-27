@@ -870,7 +870,13 @@ def save_to_database(df, seiban_prefix):
                 
                 for row in rows:
                     order_type_code = safe_str(row.get('手配区分CD', ''))
-                    
+
+                    # 手配区分CDが空欄のものは除外
+                    if not order_type_code or order_type_code.strip() == '':
+                        item_name = safe_str(row.get('品名', ''))
+                        print(f"除外: {item_name} - 手配区分CDが空欄")
+                        continue
+
                     if order_type_code == '13':
                         blanks.append(row)
                     elif order_type_code == '11':
@@ -1281,7 +1287,8 @@ def _write_detail_row(ws, detail, row_idx, is_parent=True):
     is_blank = '加工用ブランク' in str(detail.order_type)
     supplier_cd = getattr(detail, 'supplier_cd', None)
     spec2_value = detail.spec2 or ''
-    is_mekki = MekkiUtils.is_mekki_target(supplier_cd, spec2_value)
+    item_code = getattr(detail, 'item_code', None)
+    is_mekki = MekkiUtils.is_mekki_target(supplier_cd, spec2_value, item_code)
     
     remarks = MekkiUtils.add_mekki_alert(detail.remarks) if is_mekki else (detail.remarks or '')
     

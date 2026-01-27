@@ -11,24 +11,29 @@ class MekkiUtils:
     """メッキ判定ユーティリティ"""
     
     @staticmethod
-    def is_mekki_target(supplier_cd, spec2):
+    def is_mekki_target(supplier_cd, spec2, item_code=None):
         """
         メッキ出対象判定
-        
+
         Args:
             supplier_cd: 仕入先コード
             spec2: 仕様2（メッキパターンを含む可能性のある文字列）
-            
+            item_code: 品目CD（オプション）
+
         Returns:
             bool: メッキ出対象の場合True
         """
+        # 特定の品目CDはメッキ出対象（仕入先に関係なく）
+        if item_code and item_code in Constants.MEKKI_ITEM_CODES:
+            return True
+
         if not spec2 or not isinstance(spec2, str):
             return False
-        
+
         # 仕入先コードがメッキ仕入先でない場合はFalse
         if supplier_cd != Constants.MEKKI_SUPPLIER_CD and supplier_cd != str(Constants.MEKKI_SUPPLIER_CD):
             return False
-        
+
         # メッキパターンに一致するかチェック
         for pattern in Constants.MEKKI_PATTERNS:
             if re.search(pattern, spec2, re.IGNORECASE):
@@ -62,6 +67,9 @@ if __name__ == '__main__':
     print(f"supplier_cd=116, spec2='/NiCr' → {MekkiUtils.is_mekki_target(116, '/NiCr')}")
     print(f"supplier_cd=100, spec2='/Ni-P' → {MekkiUtils.is_mekki_target(100, '/Ni-P')}")
     print(f"supplier_cd=116, spec2='通常' → {MekkiUtils.is_mekki_target(116, '通常')}")
+    # 品目CDによるメッキ判定テスト
+    print(f"item_code='NMA-00017-00-00' → {MekkiUtils.is_mekki_target(100, '', 'NMA-00017-00-00')}")
+    print(f"item_code='OTHER-CODE' → {MekkiUtils.is_mekki_target(100, '', 'OTHER-CODE')}")
     
     # add_mekki_alertのテスト
     print("\n--- add_mekki_alert テスト ---")
