@@ -1077,7 +1077,7 @@ def create_order_sheet(ws, order, sheet_name=None):
         ws.add_image(img, 'I1')
         
         # 🔥 URLテキストとラベルをJ列に配置（QRコードの右側）
-        ws['K1'] = '💻️ 受入確認専用ページ'
+        ws['K1'] = '💻️ 受入確認専用ページ(社内LANよりアクセス)'
         ws['K1'].font = Font(size=9, bold=True)
         ws['K1'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
 
