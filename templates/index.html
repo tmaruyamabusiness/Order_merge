@@ -276,7 +276,20 @@
                         </div>
                     </div>
                 </div>
-                
+
+                <!-- 🔥 バーコード受入確認モーダル -->
+                <div id="barcodeReceiveModal" class="modal">
+                    <div class="modal-content" style="max-width: 500px;">
+                        <div class="modal-header" style="background: #28a745;">
+                            <h2>📦 受入確認</h2>
+                            <button onclick="closeBarcodeReceiveModal()" style="background: none; border: none; color: white; font-size: 1.5em; cursor: pointer;">×</button>
+                        </div>
+                        <div class="modal-body" id="barcodeReceiveModalBody" style="padding: 20px;">
+                            <!-- 動的に生成 -->
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 仕様１での検索 -->
                 <div class="card" style="margin-bottom: 20px; padding: 20px; background: #e8f4ff; border-radius: 10px;">
                     <h3>🔍 仕様１（型番）で検索</h3>
@@ -857,6 +870,16 @@
             document.getElementById('spec1Input').addEventListener('keypress', function(e) {
                 if (e.key === 'Enter') {
                     searchBySpec1();
+                }
+            });
+
+            // 🔥 発注番号入力でEnterキー対応（バーコードスキャン後の受入確認）
+            document.getElementById('purchaseOrderInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    const orderNumber = this.value.trim();
+                    if (orderNumber) {
+                        showBarcodeReceivePopup(orderNumber);
+                    }
                 }
             });
 

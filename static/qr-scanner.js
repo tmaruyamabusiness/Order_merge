@@ -226,16 +226,17 @@ function handleCodeDetected(data, type) {
 // handleCodeDetected()から1秒後に呼び出される
 function processScannedCode(data) {
     const purchaseOrderInput = document.getElementById('purchaseOrderInput');
-    
+
     // データの前処理（空白除去、大文字変換など）
     data = data.trim().toUpperCase();
-    
+
     // QRコードのフォーマットをチェック
     if (data.startsWith('PO:')) {
         // 発注番号のQRコード
-        purchaseOrderInput.value = data.replace('PO:', '');
+        const orderNumber = data.replace('PO:', '');
+        purchaseOrderInput.value = orderNumber;
         stopQRScanner();
-        searchByPurchaseOrder();  // index.htmlの関数を呼び出し
+        showBarcodeReceivePopup(orderNumber);  // 受入確認ポップアップを表示
     } else if (data.startsWith('ORDER:')) {
         // 注文IDのQRコード
         const orderId = data.replace('ORDER:', '');
@@ -245,7 +246,7 @@ function processScannedCode(data) {
         // 5-6桁の数字は発注番号として扱う
         purchaseOrderInput.value = data;
         stopQRScanner();
-        searchByPurchaseOrder();  // index.htmlの関数を呼び出し
+        showBarcodeReceivePopup(data);  // 受入確認ポップアップを表示
     } else if (data.startsWith('MHT')) {
         // 製番の場合
         stopQRScanner();
@@ -254,12 +255,182 @@ function processScannedCode(data) {
         // その他のフォーマット
         purchaseOrderInput.value = data;
         stopQRScanner();
-        
+
         // ユーザーに選択させる
         if (confirm(`読み取った値: ${data}\n\nこれを発注番号として検索しますか？`)) {
-            searchByPurchaseOrder();  // index.htmlの関数を呼び出し
+            showBarcodeReceivePopup(data);  // 受入確認ポップアップを表示
         }
     }
+}
+
+// ========================================
+// 🔥 バーコード受入確認ポップアップを表示
+// ========================================
+async function showBarcodeReceivePopup(orderNumber) {
+    try {
+        // 発注番号でDBを検索
+        const response = await fetch(`/api/search-by-purchase-order/${orderNumber}`);
+        const data = await response.json();
+
+        const modalBody = document.getElementById('barcodeReceiveModalBody');
+
+        if (!data.found || data.details.length === 0) {
+            // 見つからない場合
+            modalBody.innerHTML = `
+                <div style="text-align: center; padding: 20px;">
+                    <div style="font-size: 3em; margin-bottom: 20px;">❌</div>
+                    <h3 style="color: #dc3545;">発注番号が見つかりません</h3>
+                    <p style="color: #6c757d;">発注番号: <strong>${orderNumber}</strong></p>
+                    <p style="font-size: 0.9em; color: #6c757d;">
+                        この発注番号はデータベースに登録されていません。<br>
+                        マージ処理が必要な可能性があります。
+                    </p>
+                    <button class="btn btn-secondary" onclick="closeBarcodeReceiveModal()" style="margin-top: 20px;">
+                        閉じる
+                    </button>
+                </div>
+            `;
+            document.getElementById('barcodeReceiveModal').classList.add('show');
+            return;
+        }
+
+        // マージ済みデータのみ抽出
+        const mergedDetails = data.details.filter(d => d.source === 'merged');
+
+        if (mergedDetails.length === 0) {
+            // マージ済みデータがない場合
+            modalBody.innerHTML = `
+                <div style="text-align: center; padding: 20px;">
+                    <div style="font-size: 3em; margin-bottom: 20px;">⚠️</div>
+                    <h3 style="color: #ffc107;">未マージデータです</h3>
+                    <p style="color: #6c757d;">発注番号: <strong>${orderNumber}</strong></p>
+                    <p style="font-size: 0.9em; color: #6c757d;">
+                        このデータは未マージのため受入処理ができません。<br>
+                        先にマージ処理を実行してください。
+                    </p>
+                    <button class="btn btn-secondary" onclick="closeBarcodeReceiveModal()" style="margin-top: 20px;">
+                        閉じる
+                    </button>
+                </div>
+            `;
+            document.getElementById('barcodeReceiveModal').classList.add('show');
+            return;
+        }
+
+        // 受入確認画面を生成
+        let html = `
+            <div style="text-align: center; margin-bottom: 20px;">
+                <div style="font-size: 2.5em; margin-bottom: 10px;">📦</div>
+                <h3 style="margin: 0;">受入しますか？</h3>
+                <p style="color: #6c757d; margin: 5px 0;">発注番号: <strong style="font-size: 1.2em;">${orderNumber}</strong></p>
+            </div>
+        `;
+
+        mergedDetails.forEach((detail, index) => {
+            const isReceived = detail.is_received;
+            const bgColor = isReceived ? '#d4edda' : '#fff3cd';
+            const borderColor = isReceived ? '#28a745' : '#ffc107';
+
+            html += `
+                <div style="background: ${bgColor}; border: 2px solid ${borderColor}; border-radius: 10px; padding: 15px; margin-bottom: 10px;">
+                    ${isReceived ? '<div style="color: #28a745; font-weight: bold; margin-bottom: 10px;">✅ 受入済み</div>' : ''}
+                    <table style="width: 100%; font-size: 0.95em;">
+                        <tr>
+                            <td style="font-weight: bold; width: 80px; padding: 3px 0;">製番:</td>
+                            <td style="padding: 3px 0;">${detail.seiban || '-'}</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: bold; padding: 3px 0;">ユニット:</td>
+                            <td style="padding: 3px 0;">${detail.unit || '-'}</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: bold; padding: 3px 0;">発注番号:</td>
+                            <td style="padding: 3px 0;">${orderNumber}</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: bold; padding: 3px 0;">仕様1:</td>
+                            <td style="padding: 3px 0;">${detail.spec1 || '-'}</td>
+                        </tr>
+                        <tr>
+                            <td style="font-weight: bold; padding: 3px 0;">個数:</td>
+                            <td style="padding: 3px 0;"><strong style="font-size: 1.1em;">${detail.quantity || '-'} ${detail.unit_measure || ''}</strong></td>
+                        </tr>
+                    </table>
+                    ${!isReceived ? `
+                        <button class="btn btn-success" onclick="executeBarcodeReceive(${detail.id}, '${orderNumber}')"
+                                style="width: 100%; margin-top: 15px; padding: 12px; font-size: 1.1em;">
+                            ✅ この品目を受入する
+                        </button>
+                    ` : ''}
+                </div>
+            `;
+        });
+
+        html += `
+            <button class="btn btn-secondary" onclick="closeBarcodeReceiveModal()" style="width: 100%; margin-top: 10px;">
+                キャンセル
+            </button>
+        `;
+
+        modalBody.innerHTML = html;
+        document.getElementById('barcodeReceiveModal').classList.add('show');
+
+    } catch (error) {
+        console.error('検索エラー:', error);
+        alert('検索中にエラーが発生しました: ' + error.message);
+    }
+}
+
+// ========================================
+// 🔥 バーコード受入を実行
+// ========================================
+async function executeBarcodeReceive(detailId, orderNumber) {
+    try {
+        const response = await fetch(`/api/detail/${detailId}/toggle-receive`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ is_received: true })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            // 成功メッセージを表示
+            const modalBody = document.getElementById('barcodeReceiveModalBody');
+            modalBody.innerHTML = `
+                <div style="text-align: center; padding: 30px;">
+                    <div style="font-size: 4em; margin-bottom: 20px;">✅</div>
+                    <h2 style="color: #28a745; margin-bottom: 10px;">受入完了！</h2>
+                    <p style="font-size: 1.1em;">発注番号: <strong>${orderNumber}</strong></p>
+                    <button class="btn btn-primary" onclick="closeBarcodeReceiveModal(); loadOrders();" style="margin-top: 20px; padding: 12px 30px;">
+                        OK
+                    </button>
+                </div>
+            `;
+
+            // ビープ音
+            playBeep();
+
+            // バイブレーション
+            if (navigator.vibrate) {
+                navigator.vibrate([100, 50, 100]);
+            }
+        } else {
+            alert('受入処理に失敗しました: ' + (data.error || '不明なエラー'));
+        }
+    } catch (error) {
+        console.error('受入エラー:', error);
+        alert('受入処理中にエラーが発生しました: ' + error.message);
+    }
+}
+
+// ========================================
+// 🔥 バーコード受入モーダルを閉じる
+// ========================================
+function closeBarcodeReceiveModal() {
+    document.getElementById('barcodeReceiveModal').classList.remove('show');
 }
 
 // ========================================
