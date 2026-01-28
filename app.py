@@ -1185,8 +1185,13 @@ def create_order_sheet(ws, order, sheet_name=None):
         img.width = 100
         img.height = 100
         
-        # 🔥 QRコードをK1セルに配置（2列追加に対応）
-        ws.add_image(img, 'K1')
+        # 🔥 QRコードをH1セルに配置
+        ws.add_image(img, 'I1')
+        
+        # 🔥 URLテキストとラベルをJ列に配置（QRコードの右側）
+        ws['K1'] = '💻️ 受入確認専用ページ(社内LANよりアクセス)'
+        ws['K1'].font = Font(size=9, bold=True)
+        ws['K1'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
 
         # 🔥 URLテキストとラベルをM列に配置（QRコードの右側）
         ws['M1'] = '💻️ 受入確認専用ページ(社内LANよりアクセス)'
