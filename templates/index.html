@@ -2008,8 +2008,11 @@
                                 <p style="font-size: 0.8em; color: #888; margin-top: 5px;">※FullHD (1920x1080) に自動圧縮されます</p>
                             </div>
 
-                            <button class="btn btn-primary" onclick="updateOrder()">更新</button>
-                            
+                            <!-- 🔥 自動保存インジケーター -->
+                            <div id="autoSaveIndicator" style="text-align: center; padding: 10px; color: #28a745; font-size: 0.9em; display: none;">
+                                ✅ 自動保存済み
+                            </div>
+
                             <h3>詳細リスト</h3>
                             <table class="detail-table">
                                 <thead>
@@ -2055,8 +2058,110 @@
                                 openCadFile(detailId);
                             });
                         });
+
+                        // 🔥 自動保存イベントリスナーを追加
+                        setupAutoSaveListeners();
                     } catch (error) {
                         alert('詳細取得エラー: ' + error);
+                    }
+                }
+
+                // 🔥 自動保存用変数
+                let modalRemarksTimeout = null;
+
+                // 🔥 自動保存イベントリスナー設定関数
+                function setupAutoSaveListeners() {
+                    // ステータスの変更時に自動保存
+                    document.getElementById('statusSelect').addEventListener('change', function() {
+                        autoSaveModal();
+                    });
+
+                    // 場所の変更時に自動保存
+                    document.getElementById('floorSelect').addEventListener('change', function() {
+                        autoSaveModal();
+                    });
+
+                    // パレット番号の変更時に自動保存
+                    document.getElementById('palletNumberSelect').addEventListener('change', function() {
+                        autoSaveModal();
+                    });
+
+                    // 備考の変更時に自動保存（debounce）
+                    document.getElementById('remarksInput').addEventListener('input', function() {
+                        clearTimeout(modalRemarksTimeout);
+                        modalRemarksTimeout = setTimeout(function() {
+                            autoSaveModal();
+                        }, 1000);  // 1秒後に保存
+                    });
+                }
+
+                // 🔥 モーダル用自動保存関数
+                async function autoSaveModal() {
+                    const status = document.getElementById('statusSelect').value;
+                    const remarks = document.getElementById('remarksInput').value;
+                    const floor = document.getElementById('floorSelect').value;
+                    const palletNumber = document.getElementById('palletNumberSelect').value;
+
+                    try {
+                        const response = await fetch(`/api/order/${currentOrderId}/update`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                status: status,
+                                remarks: remarks,
+                                floor: floor,
+                                pallet_number: palletNumber
+                            })
+                        });
+
+                        const data = await response.json();
+
+                        if (data.success) {
+                            // 🔥 納品完了になった場合はメール送信確認
+                            if (data.show_email_prompt) {
+                                const orderInfo = data.order_info;
+
+                                // 確認ダイアログ表示
+                                const confirmMessage = `ステータスを「納品完了」に更新しました。\n\n` +
+                                    `製番: ${orderInfo.seiban}\n` +
+                                    `品名: ${orderInfo.product_name}\n` +
+                                    `場所: ${orderInfo.floor || '未設定'} ${orderInfo.pallet_number || ''}\n\n` +
+                                    `納品完了メールを作成しますか？`;
+
+                                if (confirm(confirmMessage)) {
+                                    // メール作成APIを呼び出し
+                                    const emailResponse = await fetch(`/api/order/${currentOrderId}/send-completion-email`, {
+                                        method: 'POST'
+                                    });
+
+                                    const emailData = await emailResponse.json();
+
+                                    if (emailData.success) {
+                                        showToast('✉️ メーラーを起動しました', 'success');
+                                    } else {
+                                        showToast('❌ メーラー起動エラー: ' + emailData.error, 'error');
+                                    }
+                                }
+                            }
+
+                            // 自動保存インジケーター表示
+                            const indicator = document.getElementById('autoSaveIndicator');
+                            if (indicator) {
+                                indicator.style.display = 'block';
+                                setTimeout(function() {
+                                    indicator.style.display = 'none';
+                                }, 2000);
+                            }
+
+                            // 受注リストを更新
+                            loadOrders();
+                        } else {
+                            showToast('❌ 自動保存エラー: ' + data.error, 'error');
+                        }
+                    } catch (error) {
+                        showToast('❌ 自動保存エラー: ' + error, 'error');
                     }
                 }
 

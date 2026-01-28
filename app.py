@@ -1419,8 +1419,8 @@ def _write_detail_row(ws, detail, row_idx, is_parent=True, delivery_dict=None):
     delivery_qty_display = delivery_qty if delivery_qty > 0 else ''
 
     data = [
-        detail.received_at.strftime('%Y-%m-%d %H:%M:%S') if detail.received_at else '',  # 検収日
-        '受入済' if detail.is_received else '未受入',  # 検収数（状態表示）
+        delivery_date,  # 検収日
+        delivery_qty_display,  # 検収数
         detail.delivery_date, detail.supplier, detail.order_number,
         detail.quantity, detail.unit_measure, detail.item_name,
         detail.spec1, spec2_value, detail.order_type, detail.maker, remarks
@@ -2504,8 +2504,10 @@ def receive_page(order_id):
         <p style="font-size: 0.75em; color: #666; margin-top: 8px; text-align: center;">※FullHD (1920x1080) に自動圧縮されます</p>
     </div>
 
-    <!-- 🔥 統合保存ボタン -->
-    <button class="btn btn-primary" onclick="saveAll()" style="width: 100%; padding: 15px; font-size: 1.1em; margin-top: 10px;">💾 保存</button>
+    <!-- 🔥 自動保存インジケーター -->
+    <div id="autoSaveIndicator" style="text-align: center; padding: 10px; color: #28a745; font-size: 0.9em; display: none;">
+        ✅ 自動保存済み
+    </div>
     
     <h3 style="margin: 20px 0 10px 5px;">詳細リスト</h3>
     <div id="detailsList">
@@ -2515,6 +2517,9 @@ def receive_page(order_id):
     <div id="toast" class="toast"></div>
     
     <script>
+        // 🔥 自動保存用変数
+        let remarksTimeout = null;
+
         // 🔥 ページ読み込み後にイベントリスナーを設定
         document.addEventListener('DOMContentLoaded', function() {{
             // CADリンクにイベントリスナーを追加
@@ -2525,7 +2530,59 @@ def receive_page(order_id):
                     openCadFile(detailId);
                 }});
             }});
+
+            // 🔥 自動保存イベントリスナーを追加
+            // 場所の変更時に自動保存
+            document.getElementById('floorInput').addEventListener('change', function() {{
+                autoSave();
+            }});
+
+            // パレット番号の変更時に自動保存
+            document.getElementById('palletInput').addEventListener('change', function() {{
+                autoSave();
+            }});
+
+            // 備考の変更時に自動保存（debounce）
+            document.getElementById('remarksInput').addEventListener('input', function() {{
+                clearTimeout(remarksTimeout);
+                remarksTimeout = setTimeout(function() {{
+                    autoSave();
+                }}, 1000);  // 1秒後に保存
+            }});
         }});
+
+        // 🔥 自動保存関数
+        async function autoSave() {{
+            const floor = document.getElementById('floorInput').value;
+            const palletNumber = document.getElementById('palletInput').value;
+            const remarks = document.getElementById('remarksInput').value;
+
+            try {{
+                const response = await fetch('/api/order/{order.id}/update', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        floor: floor,
+                        pallet_number: palletNumber,
+                        remarks: remarks
+                    }})
+                }});
+
+                const data = await response.json();
+
+                if (data.success) {{
+                    const indicator = document.getElementById('autoSaveIndicator');
+                    indicator.style.display = 'block';
+                    setTimeout(function() {{
+                        indicator.style.display = 'none';
+                    }}, 2000);
+                }} else {{
+                    showToast('❌ 自動保存エラー: ' + data.error, 'error');
+                }}
+            }} catch (error) {{
+                showToast('❌ 自動保存エラー: ' + error, 'error');
+            }}
+        }}
         
         // CADファイルを開く関数
         async function openCadFile(detailId) {{
