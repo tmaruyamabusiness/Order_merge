@@ -998,12 +998,13 @@ def save_to_database(df, seiban_prefix):
                     print(f"ブランク（親）候補: {len(blanks)}個, 追加工（子）候補: {len(processed)}個")
                 
                 used_processed = set()
-                
-                # 🔥 行No.の差が100で連続している関係を正しくマッチング
+
+                # 🔥 行No.の差が100 かつ 階層が連続(N→N+1)している関係をマッチング
                 for blank_row in blanks:
                     blank_row_no = safe_int(blank_row.get('行No', 0))
+                    blank_hierarchy = safe_int(blank_row.get('階層', 0))
 
-                    # 🔥 行No.の差が100（前後どちらでも）のものを探す
+                    # 🔥 行No.の差が100 かつ 階層が連続しているものを探す
                     matching_processed = None
 
                     for i, proc_row in enumerate(processed):
@@ -1011,10 +1012,12 @@ def save_to_database(df, seiban_prefix):
                             continue
 
                         proc_row_no = safe_int(proc_row.get('行No', 0))
+                        proc_hierarchy = safe_int(proc_row.get('階層', 0))
                         diff = abs(blank_row_no - proc_row_no)  # 絶対値
+                        hierarchy_diff = proc_hierarchy - blank_hierarchy  # 階層の差
 
-                        # 🔥 行No.の差が正確に100の場合のみマッチ
-                        if diff == 100:
+                        # 🔥 行No.の差が正確に100 かつ 階層が連続(N→N+1)の場合にマッチ
+                        if diff == 100 and hierarchy_diff == 1:
                             matching_processed = (i, proc_row)
                             break
 
@@ -1038,11 +1041,12 @@ def save_to_database(df, seiban_prefix):
 
                         proc_name = safe_str(proc_row.get('品名', ''))
                         proc_row_no = safe_int(proc_row.get('行No', 0))
+                        proc_hierarchy = safe_int(proc_row.get('階層', 0))
 
-                        print(f"親子設定: 親({blank_name[:15]}, 行No={blank_row_no}) "
-                              f"→ 子({proc_name[:15]}, 行No={proc_row_no}, 差=100)")
+                        print(f"親子設定: 親({blank_name[:15]}, 行No={blank_row_no}, 階層={blank_hierarchy}) "
+                              f"→ 子({proc_name[:15]}, 行No={proc_row_no}, 階層={proc_hierarchy})")
                     else:
-                        print(f"親のみ: {blank_name[:15]} (行No={blank_row_no}) - 対応する子なし（行No±100にマッチなし）")
+                        print(f"親のみ: {blank_name[:15]} (行No={blank_row_no}, 階層={blank_hierarchy}) - 対応する子なし")
                 
                 for i, proc_row in enumerate(processed):
                     if i not in used_processed:
