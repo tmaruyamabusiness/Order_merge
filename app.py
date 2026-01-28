@@ -1234,6 +1234,29 @@ def create_order_sheet(ws, order, sheet_name=None):
     ws['A4'].font = Font(size=9, bold=True, color=Constants.COLOR_RED)
     ws['A4'].alignment = Alignment(horizontal='left', vertical='center')
 
+    # 🔥 J2: 備考
+    remarks_text = order.remarks if order.remarks else ''
+    ws['J2'] = f'備考：{remarks_text}'
+    ws['J2'].font = Font(size=9)
+    ws['J2'].alignment = Alignment(horizontal='left', vertical='center')
+
+    # 🔥 J3-K4: 保管場所情報
+    ws['J3'] = '保管場所：'
+    ws['J3'].font = Font(size=10, bold=True)
+    ws['J3'].alignment = Alignment(horizontal='right', vertical='center')
+
+    ws['K3'] = order.floor if order.floor else ''
+    ws['K3'].font = Font(size=10)
+    ws['K3'].alignment = Alignment(horizontal='left', vertical='center')
+
+    ws['J4'] = '場所番号：'
+    ws['J4'].font = Font(size=10, bold=True)
+    ws['J4'].alignment = Alignment(horizontal='right', vertical='center')
+
+    ws['K4'] = order.pallet_number if order.pallet_number else ''
+    ws['K4'].font = Font(size=10)
+    ws['K4'].alignment = Alignment(horizontal='left', vertical='center')
+
     # 🔥 行の高さ調整
     ws.row_dimensions[1].height = 35
     
@@ -3092,7 +3115,13 @@ def update_order(order_id):
         
         order.updated_at = datetime.now(timezone.utc)
         db.session.commit()
-        
+
+        # 🔥 Excelファイルも更新（保管場所・備考の変更を反映）
+        try:
+            update_order_excel(order_id)
+        except Exception as excel_error:
+            print(f"⚠️ Excel更新エラー（DB保存は成功）: {excel_error}")
+
         # 🔥 納品完了になった場合の処理
         response_data = {
             'success': True,
