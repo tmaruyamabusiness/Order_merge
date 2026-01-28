@@ -2236,10 +2236,16 @@ def receive_page(order_id):
     """受入専用ページ（スマートフォン用）"""
     try:
         order = Order.query.get_or_404(order_id)
-        
+
+        # 🔥 検収データを読み込み
+        delivery_dict = DeliveryUtils.load_delivery_data()
+
         # 詳細リストを取得
         details = []
         for detail in order.details:
+            # 検収データから納入日・納入数を取得
+            delivery_info = DeliveryUtils.get_delivery_info(detail.order_number, delivery_dict)
+
             details.append({
                 'id': detail.id,
                 'delivery_date': detail.delivery_date,
@@ -2254,7 +2260,10 @@ def receive_page(order_id):
                 'remarks': detail.remarks,
                 'is_received': detail.is_received,
                 'parent_id': detail.parent_id,
-                'has_internal_processing': detail.has_internal_processing
+                'has_internal_processing': detail.has_internal_processing,
+                # 🔥 検収データを追加
+                'received_delivery_date': delivery_info.get('納入日', ''),
+                'received_delivery_qty': delivery_info.get('納入数', 0)
             })
         
         # スマートフォン用のシンプルなHTMLを返す
@@ -2836,6 +2845,8 @@ def create_detail_html(detail, all_details):
             <div><strong>仕入先:</strong> {detail['supplier'] or '-'}</div>
             <div><strong>手配区分:</strong> {detail['order_type'] or '-'}</div>
         </div>
+
+        {f'<div style="background: #e3f2fd; padding: 8px; border-radius: 5px; margin: 10px 0; font-size: 0.85em; border-left: 3px solid #2196f3;"><strong>📦 検収:</strong> {detail.get("received_delivery_date", "-")} / {int(detail.get("received_delivery_qty", 0)) if detail.get("received_delivery_qty") else "-"}個</div>' if detail.get('received_delivery_qty') else ''}
         
         {f'<div style="background: #fff3cd; padding: 8px; border-radius: 5px; margin: 10px 0; font-size: 0.9em;"><strong>備考:</strong> {detail["remarks"]}</div>' if detail.get('remarks') else ''}
         {f'<span class="status-badge badge-warning">追加工有</span>' if has_children else ''}
@@ -2923,10 +2934,17 @@ def get_order_details(order_id):
     """Get order details"""
     try:
         order = Order.query.get_or_404(order_id)
+
+        # 🔥 検収データを読み込み
+        delivery_dict = DeliveryUtils.load_delivery_data()
+
         details = []
         for detail in order.details:
             # 🔥 CAD図面情報を取得
             cad_info = get_cad_file_info(detail.spec1)
+
+            # 🔥 検収データを取得
+            delivery_info = DeliveryUtils.get_delivery_info(detail.order_number, delivery_dict)
 
             detail_dict = {
                 'id': detail.id,
@@ -2943,7 +2961,10 @@ def get_order_details(order_id):
                 'is_received': detail.is_received,
                 'received_at': detail.received_at.isoformat() if detail.received_at else None,
                 'has_internal_processing': detail.has_internal_processing,
-                'parent_id': detail.parent_id  # 🔥 親子関係を追加
+                'parent_id': detail.parent_id,  # 🔥 親子関係を追加
+                # 🔥 検収データを追加
+                'received_delivery_date': delivery_info.get('納入日', ''),
+                'received_delivery_qty': delivery_info.get('納入数', 0)
             }
 
             # 🔥 CAD情報を追加
