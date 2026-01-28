@@ -2927,7 +2927,7 @@ def create_detail_html(detail, all_details):
             <div><strong>手配区分:</strong> {detail['order_type'] or '-'}</div>
         </div>
 
-        {f'<div style="background: #e3f2fd; padding: 8px; border-radius: 5px; margin: 10px 0; font-size: 0.85em; border-left: 3px solid #2196f3;"><strong>📦 検収:</strong> {detail.get("received_delivery_date", "-")} / {int(detail.get("received_delivery_qty", 0)) if detail.get("received_delivery_qty") else "-"}個</div>' if detail.get('received_delivery_qty') else ''}
+        {f'<div style="background: #e3f2fd; padding: 8px; border-radius: 5px; margin: 10px 0; font-size: 0.85em; border-left: 3px solid #2196f3;"><strong>📝納品書入力日:</strong> {detail.get("received_delivery_date", "-")} / {int(detail.get("received_delivery_qty", 0)) if detail.get("received_delivery_qty") else "-"}個</div>' if detail.get('received_delivery_qty') else ''}
         
         {f'<div style="background: #fff3cd; padding: 8px; border-radius: 5px; margin: 10px 0; font-size: 0.9em;"><strong>備考:</strong> {detail["remarks"]}</div>' if detail.get('remarks') else ''}
         {f'<span class="status-badge badge-warning">追加工有</span>' if has_children else ''}
