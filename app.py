@@ -142,6 +142,95 @@ class OrderDetail(db.Model):
     
     order = db.relationship('Order', backref=db.backref('details', lazy=True))
 
+
+class ReceivedHistory(db.Model):
+    """受入履歴テーブル - 発注番号をキーに受入情報を永続保存"""
+    id = db.Column(db.Integer, primary_key=True)
+    order_number = db.Column(db.String(50), nullable=False, index=True)  # 発注番号（キー）
+    item_name = db.Column(db.String(200))  # 品名
+    spec1 = db.Column(db.String(200))  # 仕様1
+    quantity = db.Column(db.Integer)  # 数量
+    is_received = db.Column(db.Boolean, default=True)  # 受入状態（True=受入、False=キャンセル）
+    received_at = db.Column(db.DateTime)  # 受入日時
+    cancelled_at = db.Column(db.DateTime)  # キャンセル日時
+    received_by = db.Column(db.String(100))  # 受入者（IPアドレス）
+    cancelled_by = db.Column(db.String(100))  # キャンセル者（IPアドレス）
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    @classmethod
+    def record_receive(cls, order_number, item_name, spec1, quantity, client_ip):
+        """受入を記録"""
+        # 既存レコードを検索（発注番号+品名+仕様1+数量で一意）
+        existing = cls.query.filter_by(
+            order_number=order_number,
+            item_name=item_name,
+            spec1=spec1,
+            quantity=quantity
+        ).first()
+
+        if existing:
+            # 既存レコードを更新
+            existing.is_received = True
+            existing.received_at = datetime.now(timezone.utc)
+            existing.received_by = client_ip
+            existing.cancelled_at = None
+            existing.cancelled_by = None
+        else:
+            # 新規レコードを作成
+            history = cls(
+                order_number=order_number,
+                item_name=item_name,
+                spec1=spec1,
+                quantity=quantity,
+                is_received=True,
+                received_at=datetime.now(timezone.utc),
+                received_by=client_ip
+            )
+            db.session.add(history)
+
+        db.session.commit()
+
+    @classmethod
+    def record_cancel(cls, order_number, item_name, spec1, quantity, client_ip):
+        """受入キャンセルを記録"""
+        existing = cls.query.filter_by(
+            order_number=order_number,
+            item_name=item_name,
+            spec1=spec1,
+            quantity=quantity
+        ).first()
+
+        if existing:
+            existing.is_received = False
+            existing.cancelled_at = datetime.now(timezone.utc)
+            existing.cancelled_by = client_ip
+            db.session.commit()
+
+    @classmethod
+    def is_received_in_history(cls, order_number, item_name, spec1, quantity):
+        """履歴から受入状態を確認"""
+        existing = cls.query.filter_by(
+            order_number=order_number,
+            item_name=item_name,
+            spec1=spec1,
+            quantity=quantity,
+            is_received=True
+        ).first()
+        return existing is not None
+
+    @classmethod
+    def get_received_info(cls, order_number, item_name, spec1, quantity):
+        """履歴から受入情報を取得"""
+        return cls.query.filter_by(
+            order_number=order_number,
+            item_name=item_name,
+            spec1=spec1,
+            quantity=quantity,
+            is_received=True
+        ).first()
+
+
 class EditLog(db.Model):
     """編集ログテーブル"""
     id = db.Column(db.Integer, primary_key=True)
@@ -642,15 +731,32 @@ def create_order_detail_with_parts(row, order, all_received_items, safe_str, saf
     return detail
 
 def _restore_received_status(detail, all_received_items):
-    """受入状態復元"""
+    """受入状態復元（既存データ優先、なければReceivedHistoryから復元）"""
+    restored = False
+
+    # 1. まず既存データ（同じ製番内）から復元を試みる
     if detail.order_number and detail.order_number in all_received_items:
         for received in all_received_items[detail.order_number]:
-            if (received['item_name'] == detail.item_name and 
+            if (received['item_name'] == detail.item_name and
                 received['spec1'] == detail.spec1 and
                 received['quantity'] == detail.quantity):
                 detail.is_received = True
                 detail.received_at = received['received_at']
+                restored = True
                 break
+
+    # 2. 既存データで復元できなかった場合、ReceivedHistoryから復元
+    if not restored and detail.order_number:
+        history = ReceivedHistory.get_received_info(
+            order_number=detail.order_number,
+            item_name=detail.item_name,
+            spec1=detail.spec1,
+            quantity=detail.quantity
+        )
+        if history:
+            detail.is_received = True
+            detail.received_at = history.received_at
+            print(f"✅ 受入履歴から復元: 発注番号={detail.order_number}, 品名={detail.item_name}")
             
 def update_order_status(order):
     """注文ステータス更新"""
@@ -2931,15 +3037,39 @@ def toggle_receive_detail(detail_id):
     """Toggle receive status for a detail item"""
     try:
         detail = OrderDetail.query.get_or_404(detail_id)
-        
+
         # 現在の状態を取得
         was_received = detail.is_received
         action = 'unreceive' if was_received else 'receive'
-        
+
         # ステータスをトグル
         detail.is_received = not was_received
         detail.received_at = None if not detail.is_received else datetime.now(timezone.utc)
-        
+
+        # クライアントIPを取得
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if ',' in client_ip:
+            client_ip = client_ip.split(',')[0].strip()
+
+        # 🔥 受入履歴を記録（発注番号がある場合のみ）
+        if detail.order_number:
+            if detail.is_received:
+                ReceivedHistory.record_receive(
+                    order_number=detail.order_number,
+                    item_name=detail.item_name,
+                    spec1=detail.spec1,
+                    quantity=detail.quantity,
+                    client_ip=client_ip
+                )
+            else:
+                ReceivedHistory.record_cancel(
+                    order_number=detail.order_number,
+                    item_name=detail.item_name,
+                    spec1=detail.spec1,
+                    quantity=detail.quantity,
+                    client_ip=client_ip
+                )
+
         # 編集ログを記録
         log = EditLog(
             detail_id=detail_id,
