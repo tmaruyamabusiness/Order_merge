@@ -329,6 +329,37 @@ function processScannedCode(data) {
     // データの前処理
     data = data.trim();
 
+    // 🔥 発注番号バーコードパターン: 8桁の数字 + アルファベット1文字 (例: 00088333P)
+    const purchaseOrderBarcodePattern = /^(\d{8})[A-Za-z]$/;
+    const barcodeMatch = data.match(purchaseOrderBarcodePattern);
+
+    if (barcodeMatch) {
+        // 発注番号バーコード形式を検出
+        const numericPart = barcodeMatch[1];  // 8桁の数字部分
+
+        // 先頭のゼロを除去して発注番号を取得
+        const orderNumber = String(parseInt(numericPart, 10));
+
+        console.log(`発注番号バーコード検出: ${data} → ${orderNumber}`);
+
+        if (purchaseOrderInput) purchaseOrderInput.value = orderNumber;
+        stopQRScanner();
+        showBarcodeReceivePopup(orderNumber);
+        return;
+    }
+
+    // 🔥 誤読み取り防止: 数字+アルファベットの混在パターンを検出（無効なバーコード）
+    const invalidBarcodePattern = /^\d*[A-Za-z]+\d*[A-Za-z]*$/;
+    if (invalidBarcodePattern.test(data) && data.length >= 8) {
+        console.log(`無効なバーコード形式を検出: ${data}`);
+        showScannerStatus(`⚠️ 読み取りエラー: ${data}（再スキャンしてください）`, 'error');
+        playBeep(false);
+        // スキャナーを再開
+        isScannerPaused = false;
+        scanHistory.delete(data);  // 履歴から削除して再スキャン可能に
+        return;
+    }
+
     // QRコードのフォーマットをチェック
     if (data.toUpperCase().startsWith('PO:')) {
         // 発注番号のQRコード
