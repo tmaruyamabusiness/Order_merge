@@ -1185,8 +1185,13 @@ def create_order_sheet(ws, order, sheet_name=None):
         img.width = 100
         img.height = 100
         
-        # 🔥 QRコードをK1セルに配置（2列追加に対応）
-        ws.add_image(img, 'K1')
+        # 🔥 QRコードをH1セルに配置
+        ws.add_image(img, 'I1')
+        
+        # 🔥 URLテキストとラベルをJ列に配置（QRコードの右側）
+        ws['K1'] = '💻️ 受入確認専用ページ(社内LANよりアクセス)'
+        ws['K1'].font = Font(size=9, bold=True)
+        ws['K1'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
 
         # 🔥 URLテキストとラベルをM列に配置（QRコードの右側）
         ws['M1'] = '💻️ 受入確認専用ページ(社内LANよりアクセス)'
@@ -1414,7 +1419,8 @@ def _write_detail_row(ws, detail, row_idx, is_parent=True, delivery_dict=None):
     delivery_qty_display = delivery_qty if delivery_qty > 0 else ''
 
     data = [
-        delivery_date, delivery_qty_display,  # 納入日, 納入数（新規追加）
+        detail.received_at.strftime('%Y-%m-%d %H:%M:%S') if detail.received_at else '',  # 検収日
+        '受入済' if detail.is_received else '未受入',  # 検収数（状態表示）
         detail.delivery_date, detail.supplier, detail.order_number,
         detail.quantity, detail.unit_measure, detail.item_name,
         detail.spec1, spec2_value, detail.order_type, detail.maker, remarks
@@ -3237,7 +3243,7 @@ def export_order(order_id):
         
         # ヘッダー
         headers = ['製番', 'ユニット', '品名', '仕様１', '仕様２', '数量', '単位', 
-                   '納期', '手配区分', '発注番号', '仕入先', '仕入先CD', '備考', '受入状態']
+                   '納期', '手配区分', '発注番号', '仕入先', '仕入先CD', '備考', '検収日', '検収数']
         ws.append(headers)
         
         # データ
@@ -3256,6 +3262,7 @@ def export_order(order_id):
                 detail.supplier,
                 detail.supplier_cd,
                 detail.remarks,
+                detail.received_at.strftime('%Y-%m-%d %H:%M:%S') if detail.received_at else '',
                 '受入済' if detail.is_received else '未受入'
             ]
             ws.append(row)
@@ -3693,7 +3700,7 @@ def export_seiban(seiban):
         
         # ヘッダー
         headers = ['製番', 'ユニット', '品名', '仕様１', '仕様２', '数量', '単位', 
-                   '納期', '手配区分', '発注番号', '仕入先', '仕入先CD', '備考', '受入状態']
+                   '納期', '手配区分', '発注番号', '仕入先', '仕入先CD', '備考', '検収日', '検収数']
         ws.append(headers)
         
         # 全ユニットのデータを出力
@@ -3713,6 +3720,7 @@ def export_seiban(seiban):
                     detail.supplier,
                     detail.supplier_cd,
                     detail.remarks,
+                    detail.received_at.strftime('%Y-%m-%d %H:%M:%S') if detail.received_at else '',
                     '受入済' if detail.is_received else '未受入'
                 ]
                 ws.append(row)
