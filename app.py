@@ -1165,10 +1165,12 @@ def create_order_sheet(ws, order, sheet_name=None):
     memo = order.memo2 if order.memo2 else ''
     product_name = order.product_name if order.product_name else ''
     
-    # 🔥 QRコード生成（受入専用ページURL）
+    # 🔥 QRコード生成（受入専用ページURL）- 製番/ユニットでURL固定
     try:
+        from urllib.parse import quote
         server_url = get_server_url()
-        receive_url = f"{server_url}/receive/{order.id}"
+        unit_encoded = quote(order.unit, safe='') if order.unit else ''
+        receive_url = f"{server_url}/receive/{order.seiban}/{unit_encoded}"
         
         # QRコード画像を生成
         qr = qrcode.QRCode(
@@ -2261,11 +2263,14 @@ def unarchive_order(order_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 500
     
-@app.route('/receive/<int:order_id>')
-def receive_page(order_id):
-    """受入専用ページ（スマートフォン用）"""
+@app.route('/receive/<seiban>/<path:unit>')
+@app.route('/receive/<seiban>/')  # ユニット名が空の場合
+def receive_page(seiban, unit=''):
+    """受入専用ページ（スマートフォン用）- 製番/ユニットでURL固定"""
     try:
-        order = Order.query.get_or_404(order_id)
+        from urllib.parse import unquote
+        unit = unquote(unit)  # URLデコード
+        order = Order.query.filter_by(seiban=seiban, unit=unit, is_archived=False).first_or_404()
 
         # 🔥 検収データを読み込み
         delivery_dict = DeliveryUtils.load_delivery_data()
@@ -3020,6 +3025,7 @@ def create_detail_html(detail, all_details):
 def get_order_details(order_id):
     """Get order details"""
     try:
+        from urllib.parse import quote
         order = Order.query.get_or_404(order_id)
 
         # 🔥 検収データを読み込み
@@ -3084,7 +3090,7 @@ def get_order_details(order_id):
                 'remarks': order.remarks
             },
             'details': details,
-            'qr_code': generate_qr_code(f"{get_server_url()}/receive/{order.id}")
+            'qr_code': generate_qr_code(f"{get_server_url()}/receive/{order.seiban}/{quote(order.unit, safe='') if order.unit else ''}")
         })
     except Exception as e:
         import traceback
