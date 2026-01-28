@@ -999,48 +999,50 @@ def save_to_database(df, seiban_prefix):
                 
                 used_processed = set()
                 
+                # 🔥 行No.の差が100で連続している関係を正しくマッチング
                 for blank_row in blanks:
                     blank_row_no = safe_int(blank_row.get('行No', 0))
-                    
-                    closest_processed = None
-                    min_diff = float('inf')
-                    
+
+                    # 🔥 行No.の差が100（前後どちらでも）のものを探す
+                    matching_processed = None
+
                     for i, proc_row in enumerate(processed):
                         if i in used_processed:
                             continue
-                        
+
                         proc_row_no = safe_int(proc_row.get('行No', 0))
-                        diff = abs(blank_row_no - proc_row_no)
-                        
-                        if diff < min_diff:
-                            min_diff = diff
-                            closest_processed = (i, proc_row)
-                    
+                        diff = abs(blank_row_no - proc_row_no)  # 絶対値
+
+                        # 🔥 行No.の差が正確に100の場合のみマッチ
+                        if diff == 100:
+                            matching_processed = (i, proc_row)
+                            break
+
                     parent_detail = create_order_detail_with_parts(
                         blank_row, order, all_received_items, safe_str, safe_int
                     )
                     db.session.add(parent_detail)
                     db.session.flush()
-                    
+
                     blank_name = safe_str(blank_row.get('品名', ''))
-                    
-                    if closest_processed is not None:
-                        proc_idx, proc_row = closest_processed
+
+                    if matching_processed is not None:
+                        proc_idx, proc_row = matching_processed
                         used_processed.add(proc_idx)
-                        
+
                         child_detail = create_order_detail_with_parts(
                             proc_row, order, all_received_items, safe_str, safe_int
                         )
                         child_detail.parent_id = parent_detail.id
                         db.session.add(child_detail)
-                        
+
                         proc_name = safe_str(proc_row.get('品名', ''))
                         proc_row_no = safe_int(proc_row.get('行No', 0))
-                        
+
                         print(f"親子設定: 親({blank_name[:15]}, 行No={blank_row_no}) "
-                              f"→ 子({proc_name[:15]}, 行No={proc_row_no}, 差={min_diff})")
+                              f"→ 子({proc_name[:15]}, 行No={proc_row_no}, 差=100)")
                     else:
-                        print(f"親のみ: {blank_name[:15]} (行No={blank_row_no}) - 対応する子なし")
+                        print(f"親のみ: {blank_name[:15]} (行No={blank_row_no}) - 対応する子なし（行No±100にマッチなし）")
                 
                 for i, proc_row in enumerate(processed):
                     if i not in used_processed:
