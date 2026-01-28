@@ -38,7 +38,7 @@ from openpyxl.worksheet.page import PageMargins
 from openpyxl.chart import BarChart, Reference
 import glob
 from PIL import Image
-from utils import Constants, DataUtils, MekkiUtils, ExcelStyler, generate_qr_code, create_gantt_chart_sheet, EmailSender        
+from utils import Constants, DataUtils, MekkiUtils, ExcelStyler, generate_qr_code, create_gantt_chart_sheet, EmailSender, DeliveryUtils        
 
 app = Flask(__name__)
 
@@ -141,6 +141,95 @@ class OrderDetail(db.Model):
                             lazy='dynamic')
     
     order = db.relationship('Order', backref=db.backref('details', lazy=True))
+
+
+class ReceivedHistory(db.Model):
+    """受入履歴テーブル - 発注番号をキーに受入情報を永続保存"""
+    id = db.Column(db.Integer, primary_key=True)
+    order_number = db.Column(db.String(50), nullable=False, index=True)  # 発注番号（キー）
+    item_name = db.Column(db.String(200))  # 品名
+    spec1 = db.Column(db.String(200))  # 仕様1
+    quantity = db.Column(db.Integer)  # 数量
+    is_received = db.Column(db.Boolean, default=True)  # 受入状態（True=受入、False=キャンセル）
+    received_at = db.Column(db.DateTime)  # 受入日時
+    cancelled_at = db.Column(db.DateTime)  # キャンセル日時
+    received_by = db.Column(db.String(100))  # 受入者（IPアドレス）
+    cancelled_by = db.Column(db.String(100))  # キャンセル者（IPアドレス）
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    @classmethod
+    def record_receive(cls, order_number, item_name, spec1, quantity, client_ip):
+        """受入を記録"""
+        # 既存レコードを検索（発注番号+品名+仕様1+数量で一意）
+        existing = cls.query.filter_by(
+            order_number=order_number,
+            item_name=item_name,
+            spec1=spec1,
+            quantity=quantity
+        ).first()
+
+        if existing:
+            # 既存レコードを更新
+            existing.is_received = True
+            existing.received_at = datetime.now(timezone.utc)
+            existing.received_by = client_ip
+            existing.cancelled_at = None
+            existing.cancelled_by = None
+        else:
+            # 新規レコードを作成
+            history = cls(
+                order_number=order_number,
+                item_name=item_name,
+                spec1=spec1,
+                quantity=quantity,
+                is_received=True,
+                received_at=datetime.now(timezone.utc),
+                received_by=client_ip
+            )
+            db.session.add(history)
+
+        db.session.commit()
+
+    @classmethod
+    def record_cancel(cls, order_number, item_name, spec1, quantity, client_ip):
+        """受入キャンセルを記録"""
+        existing = cls.query.filter_by(
+            order_number=order_number,
+            item_name=item_name,
+            spec1=spec1,
+            quantity=quantity
+        ).first()
+
+        if existing:
+            existing.is_received = False
+            existing.cancelled_at = datetime.now(timezone.utc)
+            existing.cancelled_by = client_ip
+            db.session.commit()
+
+    @classmethod
+    def is_received_in_history(cls, order_number, item_name, spec1, quantity):
+        """履歴から受入状態を確認"""
+        existing = cls.query.filter_by(
+            order_number=order_number,
+            item_name=item_name,
+            spec1=spec1,
+            quantity=quantity,
+            is_received=True
+        ).first()
+        return existing is not None
+
+    @classmethod
+    def get_received_info(cls, order_number, item_name, spec1, quantity):
+        """履歴から受入情報を取得"""
+        return cls.query.filter_by(
+            order_number=order_number,
+            item_name=item_name,
+            spec1=spec1,
+            quantity=quantity,
+            is_received=True
+        ).first()
+
 
 class EditLog(db.Model):
     """編集ログテーブル"""
@@ -642,15 +731,32 @@ def create_order_detail_with_parts(row, order, all_received_items, safe_str, saf
     return detail
 
 def _restore_received_status(detail, all_received_items):
-    """受入状態復元"""
+    """受入状態復元（既存データ優先、なければReceivedHistoryから復元）"""
+    restored = False
+
+    # 1. まず既存データ（同じ製番内）から復元を試みる
     if detail.order_number and detail.order_number in all_received_items:
         for received in all_received_items[detail.order_number]:
-            if (received['item_name'] == detail.item_name and 
+            if (received['item_name'] == detail.item_name and
                 received['spec1'] == detail.spec1 and
                 received['quantity'] == detail.quantity):
                 detail.is_received = True
                 detail.received_at = received['received_at']
+                restored = True
                 break
+
+    # 2. 既存データで復元できなかった場合、ReceivedHistoryから復元
+    if not restored and detail.order_number:
+        history = ReceivedHistory.get_received_info(
+            order_number=detail.order_number,
+            item_name=detail.item_name,
+            spec1=detail.spec1,
+            quantity=detail.quantity
+        )
+        if history:
+            detail.is_received = True
+            detail.received_at = history.received_at
+            print(f"✅ 受入履歴から復元: 発注番号={detail.order_number}, 品名={detail.item_name}")
             
 def update_order_status(order):
     """注文ステータス更新"""
@@ -870,7 +976,13 @@ def save_to_database(df, seiban_prefix):
                 
                 for row in rows:
                     order_type_code = safe_str(row.get('手配区分CD', ''))
-                    
+
+                    # 手配区分CDが空欄のものは除外
+                    if not order_type_code or order_type_code.strip() == '':
+                        item_name = safe_str(row.get('品名', ''))
+                        print(f"除外: {item_name} - 手配区分CDが空欄")
+                        continue
+
                     if order_type_code == '13':
                         blanks.append(row)
                     elif order_type_code == '11':
@@ -1081,9 +1193,14 @@ def create_order_sheet(ws, order, sheet_name=None):
         ws['K1'].font = Font(size=9, bold=True)
         ws['K1'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
 
-        ws['K2'] = receive_url
-        ws['K2'].font = Font(size=8, color='0000FF', underline='single')
-        ws['K2'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+        # 🔥 URLテキストとラベルをM列に配置（QRコードの右側）
+        ws['M1'] = '💻️ 受入確認専用ページ(社内LANよりアクセス)'
+        ws['M1'].font = Font(size=9, bold=True)
+        ws['M1'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+
+        ws['M2'] = receive_url
+        ws['M2'].font = Font(size=8, color='0000FF', underline='single')
+        ws['M2'].alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
         
     except Exception as e:
         print(f"⚠️ QRコード生成エラー: {e}")
@@ -1132,33 +1249,38 @@ def create_order_sheet(ws, order, sheet_name=None):
     
     # 🔥 列幅設定（縦向き印刷用に最適化）
     column_widths = {
-        'A': 9,   # 納期
-        'B': 11,  # 仕入先略称
-        'C': 9,   # 発注番号
-        'D': 5,   # 手配数
-        'E': 4,   # 単位
-        'F': 18,  # 品名
-        'G': 15,  # 仕様１
-        'H': 12,  # 仕様２
-        'I': 10,  # 手配区分
-        'J': 8,   # メーカー
-        'K': 12   # 備考
+        'A': 9,   # 納入日（新規）
+        'B': 6,   # 納入数（新規）
+        'C': 9,   # 納期
+        'D': 11,  # 仕入先略称
+        'E': 9,   # 発注番号
+        'F': 5,   # 手配数
+        'G': 4,   # 単位
+        'H': 18,  # 品名
+        'I': 15,  # 仕様１
+        'J': 12,  # 仕様２
+        'K': 10,  # 手配区分
+        'L': 8,   # メーカー
+        'M': 12   # 備考
     }
-    
+
     for col_letter, width in column_widths.items():
         ws.column_dimensions[col_letter].width = width
-    
+
+    # 🔥 検収データを読み込み
+    delivery_dict = DeliveryUtils.load_delivery_data()
+
     # 🔥 データ行を書き込む（7行目から開始）
     row_idx = 7
     parent_details = [d for d in order.details if d.parent_id is None]
-    
+
     for detail in parent_details:
-        row_idx = _write_detail_row(ws, detail, row_idx, is_parent=True)
-        
+        row_idx = _write_detail_row(ws, detail, row_idx, is_parent=True, delivery_dict=delivery_dict)
+
         # 子アイテム
         children = [d for d in order.details if d.parent_id == detail.id]
         for child in children:
-            row_idx = _write_detail_row(ws, child, row_idx, is_parent=False)
+            row_idx = _write_detail_row(ws, child, row_idx, is_parent=False, delivery_dict=delivery_dict)
     
     # 🔥 ページ設定（縦向き印刷）
     ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
@@ -1179,7 +1301,7 @@ def create_order_sheet(ws, order, sheet_name=None):
     
     # 🔥 印刷タイトル行（ヘッダーを毎ページ印刷）
     ws.print_title_rows = '1:6'
-    ws.print_area = f'A1:K{row_idx - 1}'
+    ws.print_area = f'A1:M{row_idx - 1}'
     
     # 🔥 フッター設定（フォントサイズ10に縮小）
     footer_parts = []
@@ -1264,56 +1386,69 @@ def _create_data_rows(ws, order):
     """データ行作成"""
     row_idx = 4
     parent_details = [d for d in order.details if d.parent_id is None]
-    
+
+    # 検収データを読み込み
+    delivery_dict = DeliveryUtils.load_delivery_data()
+
     for detail in parent_details:
-        row_idx = _write_detail_row(ws, detail, row_idx, is_parent=True)
-        
+        row_idx = _write_detail_row(ws, detail, row_idx, is_parent=True, delivery_dict=delivery_dict)
+
         # 子アイテム
         children = [d for d in order.details if d.parent_id == detail.id]
         for child in children:
-            row_idx = _write_detail_row(ws, child, row_idx, is_parent=False)
-    
+            row_idx = _write_detail_row(ws, child, row_idx, is_parent=False, delivery_dict=delivery_dict)
+
     return row_idx
 
 
-def _write_detail_row(ws, detail, row_idx, is_parent=True):
+def _write_detail_row(ws, detail, row_idx, is_parent=True, delivery_dict=None):
     """詳細行を出力"""
     is_blank = '加工用ブランク' in str(detail.order_type)
     supplier_cd = getattr(detail, 'supplier_cd', None)
+    spec1_value = detail.spec1 or ''
     spec2_value = detail.spec2 or ''
-    is_mekki = MekkiUtils.is_mekki_target(supplier_cd, spec2_value)
-    
+    is_mekki = MekkiUtils.is_mekki_target(supplier_cd, spec2_value, spec1_value)
+
     remarks = MekkiUtils.add_mekki_alert(detail.remarks) if is_mekki else (detail.remarks or '')
-    
+
+    # 検収データから納入日・納入数を取得
+    delivery_info = DeliveryUtils.get_delivery_info(detail.order_number, delivery_dict)
+    delivery_date = delivery_info.get('納入日', '')
+    delivery_qty = delivery_info.get('納入数', 0)
+    # 納入数が0の場合は空欄表示
+    delivery_qty_display = delivery_qty if delivery_qty > 0 else ''
+
     data = [
+        detail.received_at.strftime('%Y-%m-%d %H:%M:%S') if detail.received_at else '',  # 検収日
+        '受入済' if detail.is_received else '未受入',  # 検収数（状態表示）
         detail.delivery_date, detail.supplier, detail.order_number,
         detail.quantity, detail.unit_measure, detail.item_name,
         detail.spec1, spec2_value, detail.order_type, detail.maker, remarks
     ]
-    
+
     row_fill = ExcelStyler.get_fill(detail.is_received, row_idx % 2 == 0, not is_parent)
     cell_font = ExcelStyler.get_font(is_blank, False)
-    
+
     for col, value in enumerate(data, 1):
         cell = ws.cell(row=row_idx, column=col, value=value)
         cell.fill = row_fill
         cell.alignment = Alignment(vertical='center')
-        
-        if col == 8 and is_mekki:
+
+        if col == 10 and is_mekki:  # 仕様２のカラムがJ(10)に変更
             cell.font = ExcelStyler.get_font(False, True)
         elif cell_font:
             cell.font = cell_font
-        
-        if col == 6 and not is_parent:
+
+        if col == 8 and not is_parent:  # 品名のカラムがH(8)に変更
             cell.value = f"  └ {value}"
-    
+
     ws.row_dimensions[row_idx].height = 27
     return row_idx + 1
 
 def _setup_print_settings(ws, row_idx, order, unit_display, customer, memo):
     """印刷設定"""
     ws.print_title_rows = '1:3'
-    ws.print_area = f'A1:K{row_idx - 1}'
+    ws.print_area = f'A1:M{row_idx - 1}'
     
     footer_parts = [order.seiban]
     if unit_display:
@@ -2107,10 +2242,16 @@ def receive_page(order_id):
     """受入専用ページ（スマートフォン用）"""
     try:
         order = Order.query.get_or_404(order_id)
-        
+
+        # 🔥 検収データを読み込み
+        delivery_dict = DeliveryUtils.load_delivery_data()
+
         # 詳細リストを取得
         details = []
         for detail in order.details:
+            # 検収データから納入日・納入数を取得
+            delivery_info = DeliveryUtils.get_delivery_info(detail.order_number, delivery_dict)
+
             details.append({
                 'id': detail.id,
                 'delivery_date': detail.delivery_date,
@@ -2125,7 +2266,10 @@ def receive_page(order_id):
                 'remarks': detail.remarks,
                 'is_received': detail.is_received,
                 'parent_id': detail.parent_id,
-                'has_internal_processing': detail.has_internal_processing
+                'has_internal_processing': detail.has_internal_processing,
+                # 🔥 検収データを追加
+                'received_delivery_date': delivery_info.get('納入日', ''),
+                'received_delivery_qty': delivery_info.get('納入数', 0)
             })
         
         # スマートフォン用のシンプルなHTMLを返す
@@ -2707,6 +2851,8 @@ def create_detail_html(detail, all_details):
             <div><strong>仕入先:</strong> {detail['supplier'] or '-'}</div>
             <div><strong>手配区分:</strong> {detail['order_type'] or '-'}</div>
         </div>
+
+        {f'<div style="background: #e3f2fd; padding: 8px; border-radius: 5px; margin: 10px 0; font-size: 0.85em; border-left: 3px solid #2196f3;"><strong>📦 検収:</strong> {detail.get("received_delivery_date", "-")} / {int(detail.get("received_delivery_qty", 0)) if detail.get("received_delivery_qty") else "-"}個</div>' if detail.get('received_delivery_qty') else ''}
         
         {f'<div style="background: #fff3cd; padding: 8px; border-radius: 5px; margin: 10px 0; font-size: 0.9em;"><strong>備考:</strong> {detail["remarks"]}</div>' if detail.get('remarks') else ''}
         {f'<span class="status-badge badge-warning">追加工有</span>' if has_children else ''}
@@ -2794,10 +2940,17 @@ def get_order_details(order_id):
     """Get order details"""
     try:
         order = Order.query.get_or_404(order_id)
+
+        # 🔥 検収データを読み込み
+        delivery_dict = DeliveryUtils.load_delivery_data()
+
         details = []
         for detail in order.details:
             # 🔥 CAD図面情報を取得
             cad_info = get_cad_file_info(detail.spec1)
+
+            # 🔥 検収データを取得
+            delivery_info = DeliveryUtils.get_delivery_info(detail.order_number, delivery_dict)
 
             detail_dict = {
                 'id': detail.id,
@@ -2814,7 +2967,10 @@ def get_order_details(order_id):
                 'is_received': detail.is_received,
                 'received_at': detail.received_at.isoformat() if detail.received_at else None,
                 'has_internal_processing': detail.has_internal_processing,
-                'parent_id': detail.parent_id  # 🔥 親子関係を追加
+                'parent_id': detail.parent_id,  # 🔥 親子関係を追加
+                # 🔥 検収データを追加
+                'received_delivery_date': delivery_info.get('納入日', ''),
+                'received_delivery_qty': delivery_info.get('納入数', 0)
             }
 
             # 🔥 CAD情報を追加
@@ -2908,15 +3064,39 @@ def toggle_receive_detail(detail_id):
     """Toggle receive status for a detail item"""
     try:
         detail = OrderDetail.query.get_or_404(detail_id)
-        
+
         # 現在の状態を取得
         was_received = detail.is_received
         action = 'unreceive' if was_received else 'receive'
-        
+
         # ステータスをトグル
         detail.is_received = not was_received
         detail.received_at = None if not detail.is_received else datetime.now(timezone.utc)
-        
+
+        # クライアントIPを取得
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if ',' in client_ip:
+            client_ip = client_ip.split(',')[0].strip()
+
+        # 🔥 受入履歴を記録（発注番号がある場合のみ）
+        if detail.order_number:
+            if detail.is_received:
+                ReceivedHistory.record_receive(
+                    order_number=detail.order_number,
+                    item_name=detail.item_name,
+                    spec1=detail.spec1,
+                    quantity=detail.quantity,
+                    client_ip=client_ip
+                )
+            else:
+                ReceivedHistory.record_cancel(
+                    order_number=detail.order_number,
+                    item_name=detail.item_name,
+                    spec1=detail.spec1,
+                    quantity=detail.quantity,
+                    client_ip=client_ip
+                )
+
         # 編集ログを記録
         log = EditLog(
             detail_id=detail_id,
@@ -3063,7 +3243,7 @@ def export_order(order_id):
         
         # ヘッダー
         headers = ['製番', 'ユニット', '品名', '仕様１', '仕様２', '数量', '単位', 
-                   '納期', '手配区分', '発注番号', '仕入先', '仕入先CD', '備考', '受入状態']
+                   '納期', '手配区分', '発注番号', '仕入先', '仕入先CD', '備考', '検収日', '検収数']
         ws.append(headers)
         
         # データ
@@ -3082,6 +3262,7 @@ def export_order(order_id):
                 detail.supplier,
                 detail.supplier_cd,
                 detail.remarks,
+                detail.received_at.strftime('%Y-%m-%d %H:%M:%S') if detail.received_at else '',
                 '受入済' if detail.is_received else '未受入'
             ]
             ws.append(row)
@@ -3519,7 +3700,7 @@ def export_seiban(seiban):
         
         # ヘッダー
         headers = ['製番', 'ユニット', '品名', '仕様１', '仕様２', '数量', '単位', 
-                   '納期', '手配区分', '発注番号', '仕入先', '仕入先CD', '備考', '受入状態']
+                   '納期', '手配区分', '発注番号', '仕入先', '仕入先CD', '備考', '検収日', '検収数']
         ws.append(headers)
         
         # 全ユニットのデータを出力
@@ -3539,6 +3720,7 @@ def export_seiban(seiban):
                     detail.supplier,
                     detail.supplier_cd,
                     detail.remarks,
+                    detail.received_at.strftime('%Y-%m-%d %H:%M:%S') if detail.received_at else '',
                     '受入済' if detail.is_received else '未受入'
                 ]
                 ws.append(row)

@@ -2015,6 +2015,8 @@
                                 <thead>
                                     <tr>
                                         <th>受入</th>
+                                        <th>検収日</th>
+                                        <th>検収数</th>
                                         <th>納期</th>
                                         <th>仕入先</th>
                                         <th>発注番号</th>
@@ -2094,6 +2096,7 @@
                     };
 
                     parentItems.forEach(parent => {
+                        const parentDeliveryQty = parent.received_delivery_qty ? Math.floor(parent.received_delivery_qty) : '';
                         html += `
                             <tr class="${parent.is_received ? 'received' : ''}">
                                 <td>
@@ -2104,6 +2107,8 @@
                                     }
                                     ${parent.has_internal_processing ? '<span class="badge badge-warning">追加工有</span>' : ''}
                                 </td>
+                                <td style="color: ${parent.received_delivery_date ? '#2196f3' : '#999'};">${parent.received_delivery_date || '-'}</td>
+                                <td style="color: ${parentDeliveryQty ? '#2196f3' : '#999'};">${parentDeliveryQty || '-'}</td>
                                 <td>${parent.delivery_date || '-'}</td>
                                 <td>${parent.supplier || '-'}</td>
                                 <td>${parent.order_number || '-'}</td>
@@ -2115,9 +2120,10 @@
                                 <td>${parent.remarks || '-'}</td>
                             </tr>
                         `;
-                        
+
                         const children = details.filter(d => d.parent_id === parent.id);
                         children.forEach(child => {
+                            const childDeliveryQty = child.received_delivery_qty ? Math.floor(child.received_delivery_qty) : '';
                             html += `
                                 <tr class="${child.is_received ? 'received' : ''}" style="background: #f0f0f0;">
                                     <td>
@@ -2127,6 +2133,8 @@
                                             `<button class="btn btn-secondary" onclick="toggleReceiveStatus(${child.id}, true, '${escapeHtml(child.order_number)}', '${escapeHtml(child.spec1)}', '${escapeHtml(child.item_name)}', '${child.quantity || ''} ${child.unit_measure || ''}')">受入</button>`
                                         }
                                     </td>
+                                    <td style="color: ${child.received_delivery_date ? '#2196f3' : '#999'};">${child.received_delivery_date || '-'}</td>
+                                    <td style="color: ${childDeliveryQty ? '#2196f3' : '#999'};">${childDeliveryQty || '-'}</td>
                                     <td>${child.delivery_date || '-'}</td>
                                     <td>${child.supplier || '-'}</td>
                                     <td>${child.order_number || '-'}</td>
