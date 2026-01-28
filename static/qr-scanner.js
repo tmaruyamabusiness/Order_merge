@@ -518,6 +518,10 @@ async function showBarcodeReceivePopup(orderNumber) {
                             <td style="padding: 3px 0;">${orderNumber}</td>
                         </tr>
                         <tr>
+                            <td style="font-weight: bold; padding: 3px 0;">品名:</td>
+                            <td style="padding: 3px 0;">${detail.item_name || '-'}</td>
+                        </tr>
+                        <tr>
                             <td style="font-weight: bold; padding: 3px 0;">仕様1:</td>
                             <td style="padding: 3px 0;">${detail.spec1 || '-'}</td>
                         </tr>
