@@ -1975,6 +1975,81 @@ def run_refresh_script():
         }), 500
 
 
+# 🔥 製番単位でデータを更新（マージ）するAPI
+@app.route('/api/refresh-seiban', methods=['POST'])
+def refresh_seiban_endpoint():
+    """製番単位でデータを最新に更新"""
+    try:
+        data = request.json
+        seiban = data.get('seiban')
+
+        if not seiban:
+            return jsonify({'success': False, 'error': '製番が指定されていません'}), 400
+
+        # デフォルトのExcelファイルパスを取得
+        excel_path = app.config.get('DEFAULT_EXCEL_PATH')
+        if not excel_path or not os.path.exists(excel_path):
+            return jsonify({'success': False, 'error': 'Excelファイルが見つかりません'}), 404
+
+        # シート名
+        sheet1_name = '手配_ALL'
+        sheet2_name = '発注_ALL'
+
+        print(f"🔄 製番 {seiban} のデータを更新中...")
+
+        # Excelファイルを読み込み
+        df1 = pd.read_excel(excel_path, sheet_name=sheet1_name, header=0)
+        df2 = pd.read_excel(excel_path, sheet_name=sheet2_name, header=0)
+
+        # 製番でフィルタリング
+        df1_filtered = df1[df1['製番'].astype(str).str.strip() == seiban]
+        df2_filtered = df2[df2['製番'].astype(str).str.strip() == seiban]
+
+        if df1_filtered.empty and df2_filtered.empty:
+            return jsonify({
+                'success': False,
+                'error': f'製番 {seiban} のデータがExcelファイルに見つかりません'
+            }), 404
+
+        # 既存のデータを更新
+        result = process_excel_file_from_dataframes(df1_filtered, df2_filtered, seiban)
+
+        # Excelファイルも再生成
+        orders = Order.query.filter_by(seiban=seiban, is_archived=False).all()
+        if orders:
+            order = orders[0]
+            filepath = get_order_excel_path(seiban, order.product_name, order.customer_abbr)
+            if filepath:
+                wb = Workbook()
+                wb.remove(wb.active)
+                create_gantt_chart_sheet(wb, seiban, orders)
+                for o in orders:
+                    create_order_sheet(wb, o)
+                wb.save(filepath)
+                print(f"✅ Excelファイル更新: {filepath}")
+
+        # ユニット数と詳細数を取得
+        total_units = Order.query.filter_by(seiban=seiban, is_archived=False).count()
+        total_details = OrderDetail.query.join(Order).filter(
+            Order.seiban == seiban,
+            Order.is_archived == False
+        ).count()
+
+        print(f"✅ 製番 {seiban} を更新完了: {total_units}ユニット, {total_details}件")
+
+        return jsonify({
+            'success': True,
+            'message': f'{total_units}ユニット, {total_details}件更新',
+            'seiban': seiban,
+            'units': total_units,
+            'details': total_details
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/')
 def index():
     """Main page"""
