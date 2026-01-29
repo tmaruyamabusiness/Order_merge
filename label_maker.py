@@ -203,16 +203,12 @@ def create_label_on_sheet(ws, start_row, order):
     anchor_cell = f"A{r}"
     ws.add_image(qr_img, anchor_cell)
 
-    # URL説明テキスト
-    cell_url = ws.cell(row=r, column=4, value='受入ページ QRコード\nスマホで読取り')
+    # URL説明テキスト + URL（マージセルの左上セルに全て記載）
+    cell_url = ws.cell(row=r, column=4,
+                       value=f'受入ページ QRコード\nスマホで読取り\n\n{receive_url}')
     cell_url.font = label_font
     cell_url.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
     cell_url.border = thin_border
-
-    # URL表示（小さく）
-    cell_url_text = ws.cell(row=r + 2, column=4, value=receive_url)
-    cell_url_text.font = small_font
-    cell_url_text.alignment = Alignment(horizontal='center', vertical='bottom', wrap_text=True)
 
     return start_row + 7  # 次のラベル開始行
 
