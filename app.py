@@ -1991,8 +1991,8 @@ def refresh_seiban_endpoint():
         if not excel_path or not os.path.exists(excel_path):
             return jsonify({'success': False, 'error': 'Excelファイルが見つかりません'}), 404
 
-        # シート名
-        sheet1_name = '手配_ALL'
+        # シート名（実際のシート名に合わせる）
+        sheet1_name = '手配リスト_ALL'
         sheet2_name = '発注_ALL'
 
         print(f"🔄 製番 {seiban} のデータを更新中...")
