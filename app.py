@@ -3578,9 +3578,8 @@ def toggle_receive_detail(detail_id):
         
         db.session.commit()
 
-        # 🔥 Excelファイルを自動更新
-        update_order_excel(order.id)
-        
+        # ※ Excel更新は手動エクスポート時のみ（受入ごとの更新は無駄なため削除）
+
         # メッセージ作成（詳細情報を含む）
         if detail.is_received:
             message = f'✅ 受入完了\n'
