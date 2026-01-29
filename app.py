@@ -1984,6 +1984,40 @@ def run_refresh_script():
 
 
 # 🔥 製番単位でデータを更新（マージ）するAPI
+@app.route('/api/generate-labels', methods=['POST'])
+def generate_labels_endpoint():
+    """製番のラベルをExcelで生成してダウンロード"""
+    try:
+        data = request.json
+        seiban = data.get('seiban')
+
+        if not seiban:
+            return jsonify({'success': False, 'error': '製番が指定されていません'}), 400
+
+        from label_maker import create_labels_for_seiban
+
+        # labelsフォルダに出力
+        labels_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'labels')
+        os.makedirs(labels_dir, exist_ok=True)
+        safe_seiban = seiban.replace('/', '_').replace('\\', '_')
+        output_path = os.path.join(labels_dir, f'{safe_seiban}_ラベル.xlsx')
+
+        result = create_labels_for_seiban(seiban, output_path)
+        if result is None:
+            return jsonify({'success': False, 'error': f'製番 {seiban} のデータが見つかりません'}), 404
+
+        return send_file(
+            output_path,
+            as_attachment=True,
+            download_name=f'{safe_seiban}_ラベル.xlsx',
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+    except Exception as e:
+        print(f"❌ ラベル生成エラー: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/refresh-seiban', methods=['POST'])
 def refresh_seiban_endpoint():
     """製番単位でデータを最新に更新"""

@@ -1774,6 +1774,9 @@
                                     <button class="btn btn-success btn-sm" onclick="event.stopPropagation(); refreshSeiban('${seiban}')" title="この製番のデータを最新に更新" style="font-size: 0.85em; padding: 4px 8px;">
                                         🔄 更新
                                     </button>
+                                    <button class="btn btn-warning btn-sm" onclick="event.stopPropagation(); generateLabels('${seiban}')" title="ラベル印刷用Excel出力" style="font-size: 0.85em; padding: 4px 8px;">
+                                        🏷 ラベル
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1937,6 +1940,42 @@
                         }
                     } catch (error) {
                         showToast('更新エラー: ' + error, 'error');
+                    } finally {
+                        document.getElementById('loadingIndicator').style.display = 'none';
+                    }
+                }
+
+                // 🏷 ラベル生成・ダウンロード
+                async function generateLabels(seiban) {
+                    showToast(`🏷 ${seiban} のラベルを作成中...`, 'info', 10000);
+                    document.getElementById('loadingIndicator').style.display = 'block';
+
+                    try {
+                        const response = await fetch('/api/generate-labels', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ seiban: seiban })
+                        });
+
+                        if (response.ok) {
+                            const blob = await response.blob();
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${seiban}_ラベル.xlsx`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            window.URL.revokeObjectURL(url);
+                            showToast(`✅ ${seiban} のラベルをダウンロードしました`, 'success');
+                        } else {
+                            const result = await response.json();
+                            showToast(`❌ ラベル生成エラー: ${result.error}`, 'error');
+                        }
+                    } catch (error) {
+                        showToast('ラベル生成エラー: ' + error, 'error');
                     } finally {
                         document.getElementById('loadingIndicator').style.display = 'none';
                     }
