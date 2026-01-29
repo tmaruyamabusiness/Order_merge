@@ -2632,9 +2632,27 @@ def receive_page(seiban, unit=''):
     <div id="detailsList">
         {''.join([create_detail_html(d, details) for d in details if not d['parent_id']])}
     </div>
-    
+
     <div id="toast" class="toast"></div>
-    
+
+    <!-- 🔥 検索中ローディングオーバーレイ -->
+    <div id="loadingOverlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 9999; justify-content: center; align-items: center;">
+        <div style="background: white; padding: 30px 50px; border-radius: 15px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+            <div style="font-size: 3em; margin-bottom: 15px;">🔍</div>
+            <div style="font-size: 1.2em; font-weight: bold; color: #333;" id="loadingText">検索中...</div>
+            <div style="margin-top: 15px;">
+                <div style="width: 50px; height: 50px; border: 5px solid #f3f3f3; border-top: 5px solid #007bff; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto;"></div>
+            </div>
+            <div style="font-size: 0.85em; color: #666; margin-top: 15px;">初回は読み込みに時間がかかります</div>
+        </div>
+    </div>
+    <style>
+        @keyframes spin {{
+            0% {{ transform: rotate(0deg); }}
+            100% {{ transform: rotate(360deg); }}
+        }}
+    </style>
+
     <script>
         // 🔥 自動保存用変数
         let remarksTimeout = null;
@@ -2824,7 +2842,19 @@ def receive_page(seiban, unit=''):
             return {{ valid: true, error: null, orderNumber: orderNumber }};
         }}
 
-        function processBarcode() {{
+        // 🔥 ローディング表示/非表示関数
+        function showLoading(message = '検索中...') {{
+            const overlay = document.getElementById('loadingOverlay');
+            const text = document.getElementById('loadingText');
+            text.textContent = message;
+            overlay.style.display = 'flex';
+        }}
+
+        function hideLoading() {{
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }}
+
+        async function processBarcode() {{
             const input = document.getElementById('barcodeInput');
             const resultDiv = document.getElementById('barcodeResult');
             const barcode = input.value;
@@ -2853,17 +2883,58 @@ def receive_page(seiban, unit=''):
 
             // 成功: 発注番号で検索
             const orderNumber = result.orderNumber;
-            resultDiv.style.display = 'block';
-            resultDiv.style.background = '#d4edda';
-            resultDiv.style.color = '#155724';
-            resultDiv.style.border = '1px solid #c3e6cb';
-            resultDiv.innerHTML = '✅ <strong>発注番号: ' + orderNumber + '</strong>';
 
-            // バイブレーション（成功）
-            if (navigator.vibrate) navigator.vibrate(100);
+            // まずページ内検索を試行
+            const foundInPage = highlightAndScrollToItem(orderNumber);
 
-            // 該当アイテムを検索してハイライト
-            highlightAndScrollToItem(orderNumber);
+            if (foundInPage) {{
+                // ページ内で見つかった場合
+                resultDiv.style.display = 'block';
+                resultDiv.style.background = '#d4edda';
+                resultDiv.style.color = '#155724';
+                resultDiv.style.border = '1px solid #c3e6cb';
+                resultDiv.innerHTML = '✅ <strong>発注番号: ' + orderNumber + '</strong>';
+                if (navigator.vibrate) navigator.vibrate(100);
+            }} else {{
+                // ページ内で見つからない場合、API検索
+                showLoading('発注番号 ' + orderNumber + ' を検索中...');
+
+                try {{
+                    const response = await fetch('/api/search-by-purchase-order/' + orderNumber);
+                    const data = await response.json();
+                    hideLoading();
+
+                    if (data.results && data.results.length > 0) {{
+                        // API検索で見つかった
+                        const item = data.results[0];
+                        resultDiv.style.display = 'block';
+                        resultDiv.style.background = '#cce5ff';
+                        resultDiv.style.color = '#004085';
+                        resultDiv.style.border = '1px solid #b8daff';
+                        resultDiv.innerHTML = '📋 <strong>発注番号: ' + orderNumber + '</strong><br>' +
+                            '製番: ' + (item['製番'] || '-') + '<br>' +
+                            '品名: ' + (item['品名'] || '-') + '<br>' +
+                            '仕入先: ' + (item['仕入先略称'] || '-') + '<br>' +
+                            '<span style="color:#856404;">⚠️ このユニットには含まれていません</span>';
+                        if (navigator.vibrate) navigator.vibrate([50, 30, 50]);
+                    }} else {{
+                        // どこにも見つからない
+                        resultDiv.style.display = 'block';
+                        resultDiv.style.background = '#fff3cd';
+                        resultDiv.style.color = '#856404';
+                        resultDiv.style.border = '1px solid #ffeeba';
+                        resultDiv.innerHTML = '⚠️ <strong>発注番号: ' + orderNumber + '</strong><br>データが見つかりません';
+                        if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+                    }}
+                }} catch (error) {{
+                    hideLoading();
+                    resultDiv.style.display = 'block';
+                    resultDiv.style.background = '#f8d7da';
+                    resultDiv.style.color = '#721c24';
+                    resultDiv.style.border = '1px solid #f5c6cb';
+                    resultDiv.innerHTML = '❌ 検索エラー: ' + error.message;
+                }}
+            }}
 
             // 入力をクリアして次のスキャンに備える
             input.value = '';
@@ -2890,7 +2961,7 @@ def receive_page(seiban, unit=''):
                     // スクロール
                     item.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
 
-                    // 3秒後にハイライト解除
+                    // 5秒後にハイライト解除
                     setTimeout(() => {{
                         item.style.boxShadow = '';
                         item.style.border = '';
@@ -2898,13 +2969,8 @@ def receive_page(seiban, unit=''):
                 }}
             }});
 
-            if (!found) {{
-                const resultDiv = document.getElementById('barcodeResult');
-                resultDiv.style.background = '#fff3cd';
-                resultDiv.style.color = '#856404';
-                resultDiv.style.border = '1px solid #ffeeba';
-                resultDiv.innerHTML = '⚠️ <strong>発注番号: ' + orderNumber + '</strong><br>このユニットに該当アイテムがありません';
-            }}
+            // 見つかったかどうかを返す
+            return found;
         }}
 
         // 受入切替関数
