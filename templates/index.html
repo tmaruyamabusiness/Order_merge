@@ -1767,12 +1767,12 @@
                                 <div class="progress-bar">
                                     <div class="progress-fill" style="width: ${totalDetails > 0 ? (totalReceived/totalDetails)*100 : 0}%"></div>
                                 </div>
-                                <div class="seiban-actions" style="display: flex; gap: 10px; align-items: center; padding-left: 15px;">
-                                    <button class="btn btn-primary" onclick="event.stopPropagation(); exportSeiban('${seiban}')" title="製番全体をExcel出力">
-                                        📄 受注リストexcel一括出力
+                                <div class="seiban-actions" style="display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding-left: 15px; margin-top: 5px;">
+                                    <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); exportSeiban('${seiban}')" title="製番全体をExcel出力" style="font-size: 0.85em; padding: 4px 8px;">
+                                        📄 Excel出力
                                     </button>
-                                    <button class="btn btn-success" onclick="event.stopPropagation(); refreshSeiban('${seiban}')" title="この製番のデータを最新に更新">
-                                        🔄 内容更新
+                                    <button class="btn btn-success btn-sm" onclick="event.stopPropagation(); refreshSeiban('${seiban}')" title="この製番のデータを最新に更新" style="font-size: 0.85em; padding: 4px 8px;">
+                                        🔄 更新
                                     </button>
                                 </div>
                             </div>
