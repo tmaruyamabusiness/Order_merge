@@ -2023,8 +2023,12 @@ def refresh_seiban_endpoint():
                 wb = Workbook()
                 wb.remove(wb.active)
                 create_gantt_chart_sheet(wb, seiban, orders)
+                # 各ユニットのシートを作成
                 for o in orders:
-                    create_order_sheet(wb, o)
+                    unit = o.unit if o.unit else 'ユニット名無し'
+                    sheet_name = f"{seiban}_{unit}"[:31]
+                    ws = wb.create_sheet(title=sheet_name)
+                    create_order_sheet(ws, o, sheet_name)
                 wb.save(filepath)
                 print(f"✅ Excelファイル更新: {filepath}")
 
