@@ -2537,7 +2537,23 @@ def receive_page(seiban, unit=''):
     <div id="autoSaveIndicator" style="text-align: center; padding: 10px; color: #28a745; font-size: 0.9em; display: none;">
         ✅ 自動保存済み
     </div>
-    
+
+    <!-- 🔥 バーコードスキャン入力欄 -->
+    <div class="info-box" style="background: #f0f7ff; border-left: 4px solid #0066cc;">
+        <div style="margin-bottom: 10px; font-weight: bold; color: #004085;">📷 バーコードスキャン</div>
+        <div style="display: flex; gap: 8px;">
+            <input type="text" id="barcodeInput"
+                   placeholder="バーコードをスキャン (例: 00088333P)"
+                   style="flex: 1; padding: 12px; border: 2px solid #0066cc; border-radius: 5px; font-size: 1em;"
+                   onkeypress="if(event.key==='Enter') processBarcode()">
+            <button class="btn btn-primary" onclick="processBarcode()" style="white-space: nowrap;">
+                🔍 検索
+            </button>
+        </div>
+        <div id="barcodeResult" style="margin-top: 10px; padding: 10px; border-radius: 5px; display: none;"></div>
+        <p style="font-size: 0.75em; color: #666; margin-top: 8px;">※ 8桁数字+チェック文字(例: 00088333P → 88333)</p>
+    </div>
+
     <h3 style="margin: 20px 0 10px 5px;">詳細リスト</h3>
     <div id="detailsList">
         {''.join([create_detail_html(d, details) for d in details if not d['parent_id']])}
@@ -2688,7 +2704,134 @@ def receive_page(seiban, unit=''):
                 showToast('❌ 保存エラー: ' + error, 'error');
             }}
         }}
-        
+
+        // 🔥 バーコード検証・処理関数
+        function validateBarcode(barcode) {{
+            // 前後の空白を除去し、大文字に変換
+            barcode = barcode.trim().toUpperCase();
+
+            // 長さチェック: 9文字（8桁数字 + 1文字アルファベット）
+            if (barcode.length !== 9) {{
+                return {{ valid: false, error: '長さが不正です（9文字必要）', orderNumber: null }};
+            }}
+
+            const digits = barcode.substring(0, 8);
+            const checkChar = barcode.charAt(8);
+
+            // 8桁が全て数字かチェック
+            if (!/^\d{{8}}$/.test(digits)) {{
+                return {{ valid: false, error: '数字部分に不正な文字が含まれています', orderNumber: null }};
+            }}
+
+            // チェック文字がアルファベットかチェック
+            if (!/^[A-Z]$/.test(checkChar)) {{
+                return {{ valid: false, error: 'チェック文字がアルファベットではありません', orderNumber: null }};
+            }}
+
+            // チェックディジット計算: 各桁の合計 - 10 = アルファベット位置
+            let digitSum = 0;
+            for (let i = 0; i < 8; i++) {{
+                digitSum += parseInt(digits.charAt(i), 10);
+            }}
+            const expectedCharCode = 65 + (digitSum - 10);  // A=65
+            const expectedChar = String.fromCharCode(expectedCharCode);
+
+            if (checkChar !== expectedChar) {{
+                return {{
+                    valid: false,
+                    error: 'チェックディジット不一致（期待: ' + expectedChar + ', 実際: ' + checkChar + '）',
+                    orderNumber: null
+                }};
+            }}
+
+            // 先頭の0を除いた発注番号を返す
+            const orderNumber = digits.replace(/^0+/, '');
+            return {{ valid: true, error: null, orderNumber: orderNumber }};
+        }}
+
+        function processBarcode() {{
+            const input = document.getElementById('barcodeInput');
+            const resultDiv = document.getElementById('barcodeResult');
+            const barcode = input.value;
+
+            if (!barcode) {{
+                resultDiv.style.display = 'none';
+                return;
+            }}
+
+            const result = validateBarcode(barcode);
+
+            if (!result.valid) {{
+                // エラー表示
+                resultDiv.style.display = 'block';
+                resultDiv.style.background = '#f8d7da';
+                resultDiv.style.color = '#721c24';
+                resultDiv.style.border = '1px solid #f5c6cb';
+                resultDiv.innerHTML = '❌ <strong>無効なバーコード</strong><br>' + result.error + '<br>再スキャンしてください';
+                input.value = '';
+                input.focus();
+
+                // バイブレーション（エラー）
+                if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+                return;
+            }}
+
+            // 成功: 発注番号で検索
+            const orderNumber = result.orderNumber;
+            resultDiv.style.display = 'block';
+            resultDiv.style.background = '#d4edda';
+            resultDiv.style.color = '#155724';
+            resultDiv.style.border = '1px solid #c3e6cb';
+            resultDiv.innerHTML = '✅ <strong>発注番号: ' + orderNumber + '</strong>';
+
+            // バイブレーション（成功）
+            if (navigator.vibrate) navigator.vibrate(100);
+
+            // 該当アイテムを検索してハイライト
+            highlightAndScrollToItem(orderNumber);
+
+            // 入力をクリアして次のスキャンに備える
+            input.value = '';
+            input.focus();
+        }}
+
+        function highlightAndScrollToItem(orderNumber) {{
+            // 全てのハイライトを解除
+            document.querySelectorAll('.detail-item').forEach(item => {{
+                item.style.boxShadow = '';
+                item.style.border = '';
+            }});
+
+            // 発注番号が一致するアイテムを探す
+            let found = false;
+            document.querySelectorAll('.detail-item').forEach(item => {{
+                const text = item.textContent;
+                // 発注番号: XXXXX の形式で検索
+                if (text.includes('発注番号: ' + orderNumber) || text.includes('発注番号:' + orderNumber)) {{
+                    found = true;
+                    // ハイライト
+                    item.style.boxShadow = '0 0 15px 5px rgba(0, 123, 255, 0.5)';
+                    item.style.border = '3px solid #007bff';
+                    // スクロール
+                    item.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+
+                    // 3秒後にハイライト解除
+                    setTimeout(() => {{
+                        item.style.boxShadow = '';
+                        item.style.border = '';
+                    }}, 5000);
+                }}
+            }});
+
+            if (!found) {{
+                const resultDiv = document.getElementById('barcodeResult');
+                resultDiv.style.background = '#fff3cd';
+                resultDiv.style.color = '#856404';
+                resultDiv.style.border = '1px solid #ffeeba';
+                resultDiv.innerHTML = '⚠️ <strong>発注番号: ' + orderNumber + '</strong><br>このユニットに該当アイテムがありません';
+            }}
+        }}
+
         // 受入切替関数
         async function toggleReceive(detailId, setReceived, orderNumber, itemName, spec1, quantity) {{
             const action = setReceived ? '受入' : '受入取消';
