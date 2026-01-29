@@ -1494,45 +1494,123 @@ def _setup_print_settings(ws, row_idx, order, unit_display, customer, memo):
     ws.sheet_view.view = 'pageBreakPreview'
     
 # Excelファイル更新用の関数を追加
-def refresh_excel_file():
-    """Excelファイルの更新処理"""
+# 🔥 更新対象のExcelファイル一覧
+EXCEL_FILES_TO_REFRESH = [
+    {
+        'path': r"\\SERVER3\Share-data\Document\仕入れ\002_手配リスト\DV_仕入.xlsx",
+        'name': 'DV_仕入',
+        'sheet': '仕入_価格確認用'
+    },
+    {
+        'path': r"\\SERVER3\share-data\Document\Acrossデータ\製番一覧表.xlsx",
+        'name': '製番一覧表',
+        'sheet': '製番'
+    }
+]
+
+def refresh_single_excel(excel_path, file_name):
+    """単一のExcelファイルを更新"""
     excel = None
+    wb = None
     try:
-        # COMを初期化（重要）
-        pythoncom.CoInitialize()
-        
-        excel_path = app.config['DEFAULT_EXCEL_PATH']
-        
-        # Excel COMオブジェクトを使用
+        if not os.path.exists(excel_path):
+            return False, f"ファイルが見つかりません: {excel_path}"
+
         excel = win32.DispatchEx("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
-        
-        # ファイルを開く（リンクを自動更新）
-        wb = excel.Workbooks.Open(excel_path, UpdateLinks=3)
-        
+        excel.AskToUpdateLinks = False
+        excel.EnableEvents = False
+
+        # ファイルを開く
+        wb = excel.Workbooks.Open(
+            Filename=excel_path,
+            UpdateLinks=0,
+            ReadOnly=False,
+            Notify=False
+        )
+
+        # 背景クエリを無効化
+        if hasattr(wb, 'Connections'):
+            for i in range(1, wb.Connections.Count + 1):
+                try:
+                    conn = wb.Connections(i)
+                    if hasattr(conn, 'ODBCConnection'):
+                        conn.ODBCConnection.BackgroundQuery = False
+                    elif hasattr(conn, 'OLEDBConnection'):
+                        conn.OLEDBConnection.BackgroundQuery = False
+                except:
+                    pass
+
         # 全接続を更新
         wb.RefreshAll()
         excel.CalculateUntilAsyncQueriesDone()
-        
+        excel.CalculateFull()
+        time.sleep(2)
+
         # 保存して閉じる
         wb.Save()
-        wb.Close(False)
+        wb.Close(SaveChanges=False)
         excel.Quit()
-        
-        return True, "Excelファイルを更新しました"
-        
+
+        return True, f"{file_name}を更新しました"
+
     except Exception as e:
-        return False, f"更新エラー: {str(e)}"
-        
+        return False, f"{file_name}の更新エラー: {str(e)}"
+
     finally:
-        # 必ずクリーンアップ
+        try:
+            if wb:
+                wb.Close(SaveChanges=False)
+        except:
+            pass
         try:
             if excel:
                 excel.Quit()
         except:
             pass
-        
+
+def refresh_excel_file():
+    """複数のExcelファイルを順番に更新"""
+    results = []
+    all_success = True
+
+    try:
+        # COMを初期化（重要）
+        pythoncom.CoInitialize()
+
+        for file_info in EXCEL_FILES_TO_REFRESH:
+            excel_path = file_info['path']
+            file_name = file_info['name']
+
+            print(f"📊 {file_name} を更新中...")
+            success, message = refresh_single_excel(excel_path, file_name)
+            results.append({'name': file_name, 'success': success, 'message': message})
+
+            if not success:
+                all_success = False
+                print(f"  ❌ {message}")
+            else:
+                print(f"  ✅ {message}")
+
+            # ファイル間で少し待機
+            time.sleep(3)
+
+        # 結果メッセージを作成
+        success_count = sum(1 for r in results if r['success'])
+        total_count = len(results)
+
+        if all_success:
+            message = f"全{total_count}ファイルを更新しました"
+        else:
+            message = f"{success_count}/{total_count}ファイルを更新（一部エラー）"
+
+        return all_success, message, results
+
+    except Exception as e:
+        return False, f"更新エラー: {str(e)}", results
+
+    finally:
         try:
             pythoncom.CoUninitialize()
         except:
@@ -1784,55 +1862,51 @@ def process_file_endpoint():
 # Routes
 @app.route('/api/refresh-excel', methods=['POST'])
 def refresh_excel_endpoint():
-    """Excelファイルを更新するエンドポイント"""
+    """複数のExcelファイルを更新するエンドポイント"""
     try:
-        result = {'success': False, 'message': ''}
-        
+        result = {'success': False, 'message': '', 'details': []}
+
         def run_refresh():
-            result['success'], result['message'] = refresh_excel_file()
-        
+            success, message, details = refresh_excel_file()
+            result['success'] = success
+            result['message'] = message
+            result['details'] = details
+
         thread = Thread(target=run_refresh)
         thread.start()
-        thread.join(timeout=60)
-        
+        thread.join(timeout=180)  # 複数ファイルのため3分に延長
+
         if thread.is_alive():
             return jsonify({
                 'success': False,
-                'error': 'タイムアウト（60秒）'
+                'error': 'タイムアウト（180秒）'
             }), 500
-        
+
         if result['success']:
             # キャッシュをクリア
             global cached_file_info, last_refresh_time
             last_refresh_time = datetime.now()
-            
+
             # ファイル情報を取得
             file_info = check_network_file_access()
             cached_file_info = file_info
-            
-            # file_infoが正常に取得できているか確認
-            if not file_info or not file_info.get('accessible'):
-                # フォールバック: 基本情報のみ返す
-                return jsonify({
-                    'success': True,
-                    'message': result['message'],
-                    'file_info': {
-                        'accessible': False,
-                        'filename': 'Excel更新完了',
-                        'size_mb': 0,
-                        'modified': datetime.now().isoformat()
-                    }
-                })
-            
+
             return jsonify({
                 'success': True,
                 'message': result['message'],
-                'file_info': file_info
+                'file_info': file_info if file_info else {
+                    'accessible': True,
+                    'filename': 'Excel更新完了',
+                    'size_mb': 0,
+                    'modified': datetime.now().isoformat()
+                },
+                'details': result['details']  # 各ファイルの更新結果
             })
         else:
             return jsonify({
                 'success': False,
-                'error': result['message']
+                'error': result['message'],
+                'details': result['details']
             }), 500
             
     except Exception as e:
@@ -2728,12 +2802,13 @@ def receive_page(seiban, unit=''):
                 return {{ valid: false, error: 'チェック文字がアルファベットではありません', orderNumber: null }};
             }}
 
-            // チェックディジット計算: 各桁の合計 - 10 = アルファベット位置
+            // チェックディジット計算: (各桁の合計 + 16) mod 26 = アルファベット位置
+            // これは (合計 - 10 + 26) mod 26 と等価で、合計が10未満でも正しく計算できる
             let digitSum = 0;
             for (let i = 0; i < 8; i++) {{
                 digitSum += parseInt(digits.charAt(i), 10);
             }}
-            const expectedCharCode = 65 + (digitSum - 10);  // A=65
+            const expectedCharCode = 65 + ((digitSum + 16) % 26);  // A=65, mod 26で循環
             const expectedChar = String.fromCharCode(expectedCharCode);
 
             if (checkChar !== expectedChar) {{
