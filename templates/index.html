@@ -1771,6 +1771,9 @@
                                     <button class="btn btn-primary" onclick="event.stopPropagation(); exportSeiban('${seiban}')" title="製番全体をExcel出力">
                                         📄 受注リストexcel一括出力
                                     </button>
+                                    <button class="btn btn-success" onclick="event.stopPropagation(); refreshSeiban('${seiban}')" title="この製番のデータを最新に更新">
+                                        🔄 内容更新
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1899,6 +1902,43 @@
                         window.location.href = `/api/export-seiban/${seiban}`;
                     } catch (error) {
                         showToast('出力エラー: ' + error, 'error');
+                    }
+                }
+
+                // 🔥 製番単位でのデータ更新（マージ）
+                async function refreshSeiban(seiban) {
+                    if (!confirm(`製番 ${seiban} のデータを最新に更新しますか？\n\n※手配発注_ALL.xlsxから最新データをマージします`)) {
+                        return;
+                    }
+
+                    // ローディング表示
+                    document.getElementById('loadingIndicator').style.display = 'block';
+                    showToast(`🔄 ${seiban} を更新中...`, 'info', 10000);
+
+                    try {
+                        const response = await fetch('/api/refresh-seiban', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                seiban: seiban
+                            })
+                        });
+
+                        const result = await response.json();
+
+                        if (result.success) {
+                            showToast(`✅ ${seiban} を更新しました（${result.message}）`, 'success');
+                            // 受注リストを再読み込み
+                            await loadOrders();
+                        } else {
+                            showToast(`❌ 更新エラー: ${result.error}`, 'error');
+                        }
+                    } catch (error) {
+                        showToast('更新エラー: ' + error, 'error');
+                    } finally {
+                        document.getElementById('loadingIndicator').style.display = 'none';
                     }
                 }
 
