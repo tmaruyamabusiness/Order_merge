@@ -775,72 +775,67 @@ def update_order_status(order):
     
     order.updated_at = datetime.now(timezone.utc)
 
-def save_order_to_excel(order, filepath):
-    """注文をExcelファイルに保存（一時ファイル経由）"""
-    import tempfile
+def save_order_to_excel(order, filepath, data_filepath=None):
+    """注文をExcelファイルに保存（dataフォルダに元データ保存→メインファイルにコピー）"""
     import shutil
-    
+
     try:
         unit_display = order.unit if order.unit else 'ユニット名無し'
         sheet_name = f"{order.seiban}_{unit_display}"
         sheet_name = re.sub(r'[\\\/\?\*\[\]:]', '', sheet_name)[:31]
-        
-        temp_fd, temp_path = tempfile.mkstemp(suffix='.xlsx')
-        os.close(temp_fd)
-        
-        try:
-            if Path(filepath).exists():
-                try:
-                    wb = load_workbook(filepath)
-                except PermissionError:
-                    return False, "ファイルが他のユーザーによって使用中です"
-                
-                # 既存シートを削除
-                if sheet_name in wb.sheetnames:
-                    del wb[sheet_name]
-                
-                # ガントチャートシートを削除して再作成
-                if "納期ガントチャート" in wb.sheetnames:
-                    del wb["納期ガントチャート"]
-            else:
+
+        # dataフォルダのパスを取得（指定がなければ自動生成）
+        if data_filepath is None:
+            data_filepath = get_order_excel_data_path(order.seiban, order.product_name, order.customer_abbr)
+
+        # === Step 1: dataフォルダに元データを保存 ===
+        if Path(data_filepath).exists():
+            try:
+                wb = load_workbook(data_filepath)
+            except PermissionError:
+                # dataフォルダのファイルも使用中の場合は新規作成
                 wb = Workbook()
                 wb.remove(wb.active)
-            
-            # 🔥 全ユニットを取得してガントチャートを再作成
-            orders = Order.query.filter_by(seiban=order.seiban, is_archived=False).all()
-            create_gantt_chart_sheet(wb, order.seiban, orders)
-            
-            # 新しいシートを作成
-            ws = wb.create_sheet(sheet_name)
-            create_order_sheet(ws, order, sheet_name)
-            
-            wb.save(temp_path)
-            wb.close()
-            
-            try:
-                shutil.move(temp_path, filepath)
-                return True, None
-            except PermissionError:
-                backup_path = filepath.replace('.xlsx', f'_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
-                shutil.move(temp_path, backup_path)
-                print(f"⚠️  バックアップ保存: {backup_path}")
-                return False, f"元ファイルが使用中のため、バックアップを作成しました: {backup_path}"
-                
-        finally:
-            if Path(temp_path).exists():
-                try:
-                    os.remove(temp_path)
-                except:
-                    pass
-        
+
+            # 既存シートを削除
+            if sheet_name in wb.sheetnames:
+                del wb[sheet_name]
+
+            # ガントチャートシートを削除して再作成
+            if "納期ガントチャート" in wb.sheetnames:
+                del wb["納期ガントチャート"]
+        else:
+            wb = Workbook()
+            wb.remove(wb.active)
+
+        # 全ユニットを取得してガントチャートを再作成
+        orders = Order.query.filter_by(seiban=order.seiban, is_archived=False).all()
+        create_gantt_chart_sheet(wb, order.seiban, orders)
+
+        # 新しいシートを作成
+        ws = wb.create_sheet(sheet_name)
+        create_order_sheet(ws, order, sheet_name)
+
+        # dataフォルダに保存
+        wb.save(data_filepath)
+        wb.close()
+        print(f"✅ 元データ保存完了: {data_filepath}")
+
+        # === Step 2: メインファイルにコピー（閲覧用） ===
+        try:
+            shutil.copy2(data_filepath, filepath)
+            print(f"✅ メインファイル更新: {filepath}")
+            return True, None
+        except PermissionError:
+            # メインファイルが使用中でもdataフォルダには保存済み
+            print(f"⚠️ メインファイル使用中（元データは保存済み）: {filepath}")
+            return True, "メインファイルは使用中ですが、元データは保存されました"
+
     except Exception as e:
         return False, str(e)
     
-def get_order_excel_path(seiban, product_name=None, customer_abbr=None):
-    """製番に対応するExcelファイルパスを取得（品名・客先名付き）"""
-    export_dir = Path(app.config['EXPORT_EXCEL_PATH'])
-    export_dir.mkdir(parents=True, exist_ok=True)
-    
+def get_order_excel_filename(seiban, product_name=None, customer_abbr=None):
+    """製番に対応するExcelファイル名を取得（品名・客先名付き）"""
     # 品名と客先名をファイル名に含める（Windowsファイル名禁止文字を除去）
     if product_name:
         safe_product_name = re.sub(r'[\\/:*?"<>|]', '', product_name)
@@ -851,7 +846,20 @@ def get_order_excel_path(seiban, product_name=None, customer_abbr=None):
             filename = f"{seiban}_{safe_product_name}_手配発注リスト.xlsx"
     else:
         filename = f"{seiban}_手配発注リスト.xlsx"
-    
+    return filename
+
+def get_order_excel_path(seiban, product_name=None, customer_abbr=None):
+    """製番に対応するExcelファイルパスを取得（閲覧用メインファイル）"""
+    export_dir = Path(app.config['EXPORT_EXCEL_PATH'])
+    export_dir.mkdir(parents=True, exist_ok=True)
+    filename = get_order_excel_filename(seiban, product_name, customer_abbr)
+    return str(export_dir / filename)
+
+def get_order_excel_data_path(seiban, product_name=None, customer_abbr=None):
+    """製番に対応するExcelファイルパスを取得（元データ用dataフォルダ）"""
+    export_dir = Path(app.config['EXPORT_EXCEL_PATH']) / 'data'
+    export_dir.mkdir(parents=True, exist_ok=True)
+    filename = get_order_excel_filename(seiban, product_name, customer_abbr)
     return str(export_dir / filename)
     
 def update_order_excel(order_id):
@@ -1985,6 +1993,40 @@ def run_refresh_script():
 
 
 # 🔥 製番単位でデータを更新（マージ）するAPI
+@app.route('/api/generate-labels', methods=['POST'])
+def generate_labels_endpoint():
+    """製番のラベルをExcelで生成してダウンロード"""
+    try:
+        data = request.json
+        seiban = data.get('seiban')
+
+        if not seiban:
+            return jsonify({'success': False, 'error': '製番が指定されていません'}), 400
+
+        from label_maker import create_labels_for_seiban
+
+        # labelsフォルダに出力
+        labels_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'labels')
+        os.makedirs(labels_dir, exist_ok=True)
+        safe_seiban = seiban.replace('/', '_').replace('\\', '_')
+        output_path = os.path.join(labels_dir, f'{safe_seiban}_ラベル.xlsx')
+
+        result = create_labels_for_seiban(seiban, output_path)
+        if result is None:
+            return jsonify({'success': False, 'error': f'製番 {seiban} のデータが見つかりません'}), 404
+
+        return send_file(
+            output_path,
+            as_attachment=True,
+            download_name=f'{safe_seiban}_ラベル.xlsx',
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+    except Exception as e:
+        print(f"❌ ラベル生成エラー: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/refresh-seiban', methods=['POST'])
 def refresh_seiban_endpoint():
     """製番単位でデータを最新に更新"""
@@ -3587,9 +3629,12 @@ def toggle_receive_detail(detail_id):
         
         db.session.commit()
 
-        # 🔥 Excelファイルを自動更新
-        update_order_excel(order.id)
-        
+        # Excelファイルを自動更新（dataフォルダに元データ保存→メインファイルにコピー）
+        try:
+            update_order_excel(order.id)
+        except Exception as excel_error:
+            print(f"⚠️ Excel更新エラー（DB保存は成功）: {excel_error}")
+
         # メッセージ作成（詳細情報を含む）
         if detail.is_received:
             message = f'✅ 受入完了\n'
