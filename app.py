@@ -1193,8 +1193,8 @@ def create_order_sheet(ws, order, sheet_name=None):
         img.width = 100
         img.height = 100
         
-        # 🔥 QRコードをH1セルに配置
-        ws.add_image(img, 'I1')
+        # 🔥 QRコードをI2セルに配置
+        ws.add_image(img, 'I2')
 
         # 🔥 URLテキストとラベルをM列に配置（QRコードの右側）
         ws['M1'] = '💻️ 受入確認専用ページ(社内LANよりアクセス)'
@@ -1217,6 +1217,7 @@ def create_order_sheet(ws, order, sheet_name=None):
         a1_text_parts.append(customer)
     if memo:
         a1_text_parts.append(memo)
+        a1_text_parts.append(" 受入チェックリスト")
     
     ws['A1'] = ' '.join(a1_text_parts)
     ws['A1'].font = Font(size=14, bold=True)
