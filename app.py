@@ -1260,7 +1260,15 @@ def create_order_sheet(ws, order, sheet_name=None):
     ws['K4'] = order.pallet_number if order.pallet_number else ''
     ws['K4'].font = Font(size=10)
     ws['K4'].alignment = Alignment(horizontal='left', vertical='center')
-
+    
+    ws['L4'] = 'シート作成日：'
+    ws['L4'].font = Font(size=10, bold=True)
+    ws['L4'].alignment = Alignment(horizontal='right', vertical='center')
+    
+    ws['M4'] = datetime.now().strftime('%Y/%m/%d')
+    ws['M4'].font = Font(size=10, bold=True, color='0000FF')
+    ws['M4'].alignment = Alignment(horizontal='left', vertical='center')
+    
     # 🔥 行の高さ調整
     ws.row_dimensions[1].height = 35
     
