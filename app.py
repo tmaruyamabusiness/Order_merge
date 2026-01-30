@@ -1446,12 +1446,12 @@ def _get_cad_hyperlink(spec1):
     # サーバーアクセス可能なら具体的なファイルを検索
     try:
         import glob
-        mx2_files = glob.glob(os.path.join(cad_folder, f"{spec1}*.mx2"))
-        if mx2_files:
-            return mx2_files[0]
         pdf_files = glob.glob(os.path.join(cad_folder, f"{spec1}*.pdf"))
         if pdf_files:
             return pdf_files[0]
+        mx2_files = glob.glob(os.path.join(cad_folder, f"{spec1}*.mx2"))
+        if mx2_files:
+            return mx2_files[0]
     except Exception:
         pass
     # ファイルが見つからない場合はフォルダへのリンク

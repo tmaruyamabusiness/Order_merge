@@ -321,12 +321,12 @@ def _get_cad_hyperlink(spec1):
     cad_folder = f"\\\\SERVER3\\Share-data\\CadData\\Parts\\{folder_letter}"
     try:
         import glob
-        mx2_files = glob.glob(os.path.join(cad_folder, f"{spec1}*.mx2"))
-        if mx2_files:
-            return mx2_files[0]
         pdf_files = glob.glob(os.path.join(cad_folder, f"{spec1}*.pdf"))
         if pdf_files:
             return pdf_files[0]
+        mx2_files = glob.glob(os.path.join(cad_folder, f"{spec1}*.mx2"))
+        if mx2_files:
+            return mx2_files[0]
     except Exception:
         pass
     return cad_folder
