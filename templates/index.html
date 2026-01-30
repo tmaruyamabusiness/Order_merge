@@ -160,8 +160,15 @@
                     <!-- 単一製番入力 -->
                     <div id="singleModeInput">
                         <div class="form-group">
-                            <label>製番 (例: MHT0123):</label>
-                            <input type="text" id="seibanInput" placeholder="MHT0123">
+                            <label>製番 (一覧から選択 または 手動入力):</label>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <select id="seibanSelect" onchange="onSeibanSelect()" style="flex: 2; padding: 8px;">
+                                    <option value="">-- 一覧から選択 --</option>
+                                </select>
+                                <button class="btn btn-secondary" onclick="loadSeibanList()" style="white-space: nowrap; padding: 8px 12px;">一覧取得</button>
+                            </div>
+                            <input type="text" id="seibanInput" placeholder="MHT0123（手動入力も可）" style="margin-top: 6px;">
+                            <small style="color: #666;">一覧から選択するか、直接入力してください</small>
                         </div>
                         <button class="btn btn-primary" onclick="processFile()">処理開始</button>
                     </div>
@@ -1605,6 +1612,38 @@
             }
         }
 
+        // 製番一覧を取得してドロップダウンに表示
+        async function loadSeibanList() {
+            const select = document.getElementById('seibanSelect');
+            select.innerHTML = '<option value="">読み込み中...</option>';
+            try {
+                const response = await fetch('/api/seiban-list');
+                const data = await response.json();
+                select.innerHTML = '<option value="">-- 一覧から選択 --</option>';
+                if (data.success && data.items) {
+                    data.items.forEach(item => {
+                        const opt = document.createElement('option');
+                        opt.value = item.seiban;
+                        opt.textContent = `${item.seiban}  ${item.product_name}  (${item.customer_abbr})`;
+                        select.appendChild(opt);
+                    });
+                } else {
+                    alert('製番一覧の取得に失敗: ' + (data.error || '不明なエラー'));
+                }
+            } catch (error) {
+                select.innerHTML = '<option value="">-- 一覧から選択 --</option>';
+                alert('製番一覧の取得エラー: ' + error);
+            }
+        }
+
+        // ドロップダウン選択時にテキスト入力へ反映
+        function onSeibanSelect() {
+            const select = document.getElementById('seibanSelect');
+            if (select.value) {
+                document.getElementById('seibanInput').value = select.value;
+            }
+        }
+
         // processFile関数を修正
         async function processFile() {
             const sheet1 = document.getElementById('sheet1Select').value;
@@ -1675,6 +1714,7 @@
                     
                     // フォームリセット
                     document.getElementById('seibanInput').value = '';
+                    document.getElementById('seibanSelect').selectedIndex = 0;
                     document.getElementById('sheetSelection').style.display = 'none';
                     document.getElementById('enableOrderDateFilter').checked = false;
                     document.getElementById('orderDateFilterInput').style.display = 'none';

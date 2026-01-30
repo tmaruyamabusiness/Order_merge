@@ -1837,6 +1837,30 @@ def check_network_file_with_diff():
             'error': str(e)
         })
 
+@app.route('/api/seiban-list', methods=['GET'])
+def get_seiban_list():
+    """製番一覧表から製番リストを取得（ドロップダウン用）"""
+    try:
+        seiban_info = load_seiban_info()
+        if not seiban_info:
+            return jsonify({'success': False, 'error': '製番一覧表を読み込めません', 'items': []})
+
+        items = []
+        for seiban, info in seiban_info.items():
+            items.append({
+                'seiban': seiban,
+                'product_name': info.get('product_name', ''),
+                'customer_abbr': info.get('customer_abbr', '')
+            })
+
+        # 製番の降順でソート（新しいものが上）
+        items.sort(key=lambda x: x['seiban'], reverse=True)
+
+        return jsonify({'success': True, 'items': items, 'count': len(items)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'items': []})
+
+
 @app.route('/api/detect-seibans', methods=['POST'])
 def detect_seibans():
     """製番を自動検出"""
