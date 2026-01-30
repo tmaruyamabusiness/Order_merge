@@ -38,7 +38,8 @@ from openpyxl.worksheet.page import PageMargins
 from openpyxl.chart import BarChart, Reference
 import glob
 from PIL import Image
-from utils import Constants, DataUtils, MekkiUtils, ExcelStyler, generate_qr_code, create_gantt_chart_sheet, EmailSender, DeliveryUtils        
+from utils import Constants, DataUtils, MekkiUtils, ExcelStyler, generate_qr_code, create_gantt_chart_sheet, EmailSender, DeliveryUtils
+
 
 app = Flask(__name__)
 
@@ -72,22 +73,11 @@ os.makedirs('exports', exist_ok=True)
 os.makedirs('cache', exist_ok=True)
 
 # Global variables for background tasks
-last_refresh_time = None
 refresh_thread = None
-cached_file_info = {}
-
-# Global variables for background tasks
-last_refresh_time = None
-refresh_thread = None
-cached_file_info = {}
-
-# 🔥 発注リストの高速検索用キャッシュ
-order_all_cache = {}
-order_all_cache_time = None
-CACHE_EXPIRY_SECONDS = 28800  # 8時間キャッシュ
 
 
 # Database Models
+
 class Order(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     seiban = db.Column(db.String(50), nullable=False)
@@ -98,14 +88,15 @@ class Order(db.Model):
     product_name = db.Column(db.String(200))
     customer_abbr = db.Column(db.String(100))
     memo2 = db.Column(db.String(200))
-    pallet_number = db.Column(db.String(50))  # ← 追加
-    floor = db.Column(db.String(10))  # ← 追加
-    image_path = db.Column(db.String(500))  # 画像パス
+    pallet_number = db.Column(db.String(50))
+    floor = db.Column(db.String(10))
+    image_path = db.Column(db.String(500))
     is_archived = db.Column(db.Boolean, default=False)
     archived_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    
+
+
 class OrderDetail(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     order_id = db.Column(db.Integer, db.ForeignKey('order.id'), nullable=False)
