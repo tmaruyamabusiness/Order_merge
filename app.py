@@ -1433,6 +1433,31 @@ def _create_data_rows(ws, order):
     return row_idx
 
 
+def _get_cad_hyperlink(spec1):
+    """仕様1からCADファイルのハイパーリンクパスを取得"""
+    if not spec1 or not str(spec1).startswith('N'):
+        return None
+    spec1 = str(spec1)
+    parts = spec1.split('-')
+    if len(parts) < 2 or len(parts[0]) < 2:
+        return None
+    folder_letter = parts[0][1].upper()
+    cad_folder = f"\\\\SERVER3\\Share-data\\CadData\\Parts\\{folder_letter}"
+    # サーバーアクセス可能なら具体的なファイルを検索
+    try:
+        import glob
+        mx2_files = glob.glob(os.path.join(cad_folder, f"{spec1}*.mx2"))
+        if mx2_files:
+            return mx2_files[0]
+        pdf_files = glob.glob(os.path.join(cad_folder, f"{spec1}*.pdf"))
+        if pdf_files:
+            return pdf_files[0]
+    except Exception:
+        pass
+    # ファイルが見つからない場合はフォルダへのリンク
+    return cad_folder
+
+
 def _write_detail_row(ws, detail, row_idx, is_parent=True, delivery_dict=None):
     """詳細行を出力"""
     is_blank = '加工用ブランク' in str(detail.order_type)
@@ -1449,6 +1474,9 @@ def _write_detail_row(ws, detail, row_idx, is_parent=True, delivery_dict=None):
     delivery_qty = delivery_info.get('納入数', 0)
     # 納入数が0の場合は空欄表示
     delivery_qty_display = delivery_qty if delivery_qty > 0 else ''
+
+    # 仕様1のCADリンクを事前に取得
+    cad_link = _get_cad_hyperlink(spec1_value)
 
     data = [
         delivery_date,  # 検収日
@@ -1473,6 +1501,11 @@ def _write_detail_row(ws, detail, row_idx, is_parent=True, delivery_dict=None):
 
         if col == 8 and not is_parent:  # 品名のカラムがH(8)に変更
             cell.value = f"  └ {value}"
+
+        # 仕様１(col=9)にCADハイパーリンクを設定
+        if col == 9 and cad_link:
+            cell.hyperlink = cad_link
+            cell.font = Font(color="0000FF", underline="single", size=cell_font.size if cell_font and cell_font.size else 10)
 
     ws.row_dimensions[row_idx].height = 27
     return row_idx + 1
