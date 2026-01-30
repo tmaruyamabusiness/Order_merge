@@ -141,6 +141,64 @@ function deselectAllSeibansForGantt() {
     updateGanttFilterCount();
 }
 
+// 設定変更時に再描画
+function applyGanttOptions() {
+    if (allGanttData.length === 0) return;
+
+    // 現在のフィルタ適用データで再描画
+    const filteredData = allGanttData.filter(d => selectedSeibansForGantt.has(d.seiban));
+    if (filteredData.length > 0) {
+        renderGanttChart(filteredData);
+    }
+}
+
+// ガントチャート印刷
+function printGanttChart() {
+    const canvas = document.getElementById('ganttChart');
+    if (!canvas || !ganttChartInstance) {
+        alert('ガントチャートが表示されていません');
+        return;
+    }
+
+    const dataUrl = canvas.toDataURL('image/png', 1.0);
+    const printWindow = window.open('', '_blank');
+    const spanVal = document.getElementById('ganttSpanSelect') ? document.getElementById('ganttSpanSelect').value : '3';
+    const posVal = document.getElementById('ganttTodayPosition') ? document.getElementById('ganttTodayPosition').value : 'center';
+    const posLabel = posVal === 'right' ? '今日=右端' : '前後均等';
+    const now = new Date().toLocaleString('ja-JP');
+
+    printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>納期ガントチャート</title>
+            <style>
+                @media print {
+                    @page { size: landscape; margin: 10mm; }
+                    body { margin: 0; }
+                }
+                body { font-family: 'Meiryo', sans-serif; text-align: center; }
+                .header { margin-bottom: 10px; }
+                .header h2 { margin: 0 0 5px 0; }
+                .header .info { font-size: 0.85em; color: #666; }
+                img { max-width: 100%; height: auto; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h2>納期ガントチャート</h2>
+                <div class="info">期間: ${spanVal}ヶ月 ／ ${posLabel} ／ 印刷日時: ${now}</div>
+            </div>
+            <img src="${dataUrl}" />
+            <script>
+                window.onload = function() { window.print(); window.close(); };
+            </script>
+        </body>
+        </html>
+    `);
+    printWindow.document.close();
+}
+
 // フィルタ適用
 function applyGanttFilter() {
     // 選択された製番を更新
@@ -340,17 +398,31 @@ function renderGanttChart(data) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     console.log('📅 今日の日付:', today.toLocaleDateString('ja-JP'), '(timestamp:', today.getTime(), ')');
-    
-    const threeMonthsAgo = new Date(today);
-    threeMonthsAgo.setMonth(today.getMonth() - 3);
-    const threeMonthsLater = new Date(today);
-    threeMonthsLater.setMonth(today.getMonth() + 3);
-    
-    console.log('📅 表示範囲:', threeMonthsAgo.toLocaleDateString('ja-JP'), '～', threeMonthsLater.toLocaleDateString('ja-JP'));
-    
+
+    // 設定値を取得
+    const spanMonths = parseInt(document.getElementById('ganttSpanSelect') ? document.getElementById('ganttSpanSelect').value : '3') || 3;
+    const todayPosition = document.getElementById('ganttTodayPosition') ? document.getElementById('ganttTodayPosition').value : 'center';
+
+    let rangeStart, rangeEnd;
+    if (todayPosition === 'right') {
+        // 今日が右端 → 過去をスパン分表示
+        rangeStart = new Date(today);
+        rangeStart.setMonth(today.getMonth() - spanMonths);
+        rangeEnd = new Date(today);
+        rangeEnd.setDate(today.getDate() + 7); // 少し余白
+    } else {
+        // 中央（前後均等）
+        rangeStart = new Date(today);
+        rangeStart.setMonth(today.getMonth() - spanMonths);
+        rangeEnd = new Date(today);
+        rangeEnd.setMonth(today.getMonth() + spanMonths);
+    }
+
+    console.log(`📅 表示範囲 (${spanMonths}ヶ月, ${todayPosition}):`, rangeStart.toLocaleDateString('ja-JP'), '～', rangeEnd.toLocaleDateString('ja-JP'));
+
     // 範囲外のデータをフィルタ
     const filteredData = data.filter(item => {
-        return item.start <= threeMonthsLater && item.end >= threeMonthsAgo;
+        return item.start <= rangeEnd && item.end >= rangeStart;
     });
     
     console.log(`📅 フィルタ: ${data.length}件 → ${filteredData.length}件`);
@@ -369,8 +441,9 @@ function renderGanttChart(data) {
     }
     
     if (filteredData.length === 0) {
-        document.getElementById('ganttChartContainer').innerHTML = 
-            '<p style="text-align: center; padding: 50px; color: #6c757d;">今後3ヶ月以内の納期データがありません</p>';
+        const posLabel = todayPosition === 'right' ? '過去' : '前後';
+        document.getElementById('ganttChartContainer').innerHTML =
+            `<p style="text-align: center; padding: 50px; color: #6c757d;">${posLabel}${spanMonths}ヶ月以内の納期データがありません</p>`;
         return;
     }
     
@@ -444,7 +517,7 @@ function renderGanttChart(data) {
                 legend: { display: false },
                 title: {
                     display: true,
-                    text: `納期ガントチャート（${filteredData.length}件）`,
+                    text: `納期ガントチャート（${filteredData.length}件 / ${spanMonths}ヶ月${todayPosition === 'right' ? ' 過去' : ' 前後'}）`,
                     font: { size: 16 }
                 },
                 tooltip: {
@@ -493,8 +566,8 @@ function renderGanttChart(data) {
                         displayFormats: { day: 'M/d' },
                         tooltipFormat: 'yyyy/MM/dd'
                     },
-                    min: threeMonthsAgo.getTime(),
-                    max: threeMonthsLater.getTime(),
+                    min: rangeStart.getTime(),
+                    max: rangeEnd.getTime(),
                     title: { display: true, text: '納期' },
                     grid: {
                         color: function(context) {

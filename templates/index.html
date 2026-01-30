@@ -48,6 +48,27 @@
                     
                     <!-- 🔥 製番フィルタUI -->
                     <div id="ganttFilterContainer" style="display: none; background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+                        <!-- ガントチャート設定 -->
+                        <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 12px; flex-wrap: wrap;">
+                            <strong>⚙ 表示設定:</strong>
+                            <div style="display: flex; align-items: center; gap: 5px;">
+                                <label style="margin: 0; font-size: 0.9em;">期間:</label>
+                                <select id="ganttSpanSelect" onchange="applyGanttOptions()" style="padding: 4px 8px; border-radius: 4px; border: 1px solid #ccc;">
+                                    <option value="1">1ヶ月</option>
+                                    <option value="3" selected>3ヶ月</option>
+                                    <option value="6">6ヶ月</option>
+                                </select>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 5px;">
+                                <label style="margin: 0; font-size: 0.9em;">今日の位置:</label>
+                                <select id="ganttTodayPosition" onchange="applyGanttOptions()" style="padding: 4px 8px; border-radius: 4px; border: 1px solid #ccc;">
+                                    <option value="center">中央（前後均等）</option>
+                                    <option value="right">右端（過去メイン）</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="printGanttChart()" style="margin-left: auto; border: 1px solid #6c757d; background: white; padding: 4px 12px;">🖨 印刷</button>
+                        </div>
+                        <hr style="margin: 8px 0; border-color: #dee2e6;">
                         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
                             <strong>🔍 製番フィルタ:</strong>
                             <button class="btn btn-sm btn-primary" onclick="selectAllSeibansForGantt()">全て選択</button>
