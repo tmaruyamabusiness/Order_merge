@@ -73,7 +73,14 @@ os.makedirs('exports', exist_ok=True)
 os.makedirs('cache', exist_ok=True)
 
 # Global variables for background tasks
+last_refresh_time = None
 refresh_thread = None
+cached_file_info = {}
+
+# 発注リストの高速検索用キャッシュ
+order_all_cache = {}
+order_all_cache_time = None
+CACHE_EXPIRY_SECONDS = 28800  # 8時間キャッシュ
 
 
 # Database Models
