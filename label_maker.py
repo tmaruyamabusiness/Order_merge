@@ -115,22 +115,28 @@ def create_label_on_sheet(ws, start_row, order):
     )
     header_fill = PatternFill(start_color='D9E2F3', end_color='D9E2F3', fill_type='solid')
 
-    # --- ラベル枠（7行分使用） ---
-    # Row 0: 製番（大きく）
-    # Row 1: 品名
-    # Row 2: 客先
-    # Row 3: ユニット（大きく）
-    # Row 4-6: QRコード + URL
+    # --- ラベル枠（8行分使用: 1行空白 + 4行情報 + 3行QR） ---
+    # Row 0: 空白（テープ貼付スペース）
+    # Row 1: 製番（大きく）
+    # Row 2: 品名
+    # Row 3: 客先
+    # Row 4: ユニット（大きく）
+    # Row 5-7: QRコード + URL
 
     r = start_row
 
-    # ラベル枠線と背景
-    for row_offset in range(7):
+    # Row 0: テープ貼付用スペース（空白）
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
+    # 枠線なし、空白のまま
+
+    # ラベル枠線と背景（Row 1-7）
+    for row_offset in range(1, 8):
         for col in range(1, 9):  # A-H
             cell = ws.cell(row=r + row_offset, column=col)
             cell.border = thin_border
 
-    # Row 0: 「製番」ラベル + 値
+    # Row 1: 「製番」ラベル + 値
+    r += 1
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
     cell_label = ws.cell(row=r, column=1, value='製番')
     cell_label.font = title_font
@@ -144,7 +150,7 @@ def create_label_on_sheet(ws, start_row, order):
     cell_val.alignment = center_align
     cell_val.border = thin_border
 
-    # Row 1: 「品名」ラベル + 値
+    # Row 2: 「品名」ラベル + 値
     r += 1
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
     cell_label = ws.cell(row=r, column=1, value='品名')
@@ -195,11 +201,11 @@ def create_label_on_sheet(ws, start_row, order):
     ws.merge_cells(start_row=r, start_column=1, end_row=r + 2, end_column=3)
     ws.merge_cells(start_row=r, start_column=4, end_row=r + 2, end_column=8)
 
-    # QRコード画像
-    qr_buf = generate_qr_image(receive_url, box_size=6)
+    # QRコード画像（小さめ）
+    qr_buf = generate_qr_image(receive_url, box_size=4)
     qr_img = Image(qr_buf)
-    qr_img.width = 150
-    qr_img.height = 150
+    qr_img.width = 80
+    qr_img.height = 80
     anchor_cell = f"A{r}"
     ws.add_image(qr_img, anchor_cell)
 
@@ -210,7 +216,7 @@ def create_label_on_sheet(ws, start_row, order):
     cell_url.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
     cell_url.border = thin_border
 
-    return start_row + 7  # 次のラベル開始行
+    return start_row + 8  # 次のラベル開始行（8行分: 空白1 + 情報4 + QR3）
 
 
 def create_labels_for_seiban(seiban, output_path=None):
@@ -252,33 +258,35 @@ def create_labels_for_seiban(seiban, output_path=None):
         ws.column_dimensions['H'].width = 12
 
         # --- 行高さ設定 ---
-        # ラベル1: 行1-7, ラベル2: 行9-15 （行8は区切り）
-        label_row_heights = [45, 40, 40, 50, 55, 55, 55]  # 7行分
+        # A4縦を全面使用: ラベル1(行1-8) + 区切り(行9-10) + ラベル2(行11-18)
+        # 各ラベル8行: テープ貼付スペース1 + 情報4 + QR3
+        label_row_heights = [40, 55, 50, 50, 60, 35, 35, 35]  # 8行分
         for i, h in enumerate(label_row_heights):
-            ws.row_dimensions[1 + i].height = h
+            ws.row_dimensions[1 + i].height = h     # ラベル1: 行1-8
 
-        ws.row_dimensions[8].height = 20  # 区切り行
+        ws.row_dimensions[9].height = 25   # 区切り行（上余白）
+        ws.row_dimensions[10].height = 25  # 区切り行（下余白）
 
         for i, h in enumerate(label_row_heights):
-            ws.row_dimensions[9 + i].height = h
+            ws.row_dimensions[11 + i].height = h    # ラベル2: 行11-18
 
         # --- ラベル1（上半分）---
         create_label_on_sheet(ws, 1, order)
 
-        # --- 区切り線（行8）---
+        # --- 区切り線（行9-10）---
         for col in range(1, 9):
-            cell = ws.cell(row=8, column=col)
+            cell = ws.cell(row=9, column=col)
             cell.border = Border(
                 bottom=Side(style='dashed', color='999999')
             )
-            cell.alignment = Alignment(horizontal='center', vertical='center')
-        ws.cell(row=8, column=4, value='✂ 切り取り線').font = Font(
+        ws.merge_cells(start_row=9, start_column=1, end_row=10, end_column=8)
+        ws.cell(row=9, column=1, value='✂ 切り取り線').font = Font(
             name='Meiryo UI', size=8, color='999999'
         )
-        ws.cell(row=8, column=4).alignment = Alignment(horizontal='center', vertical='center')
+        ws.cell(row=9, column=1).alignment = Alignment(horizontal='center', vertical='center')
 
         # --- ラベル2（下半分）---
-        create_label_on_sheet(ws, 9, order)
+        create_label_on_sheet(ws, 11, order)
 
     # --- 保存 ---
     if output_path is None:
