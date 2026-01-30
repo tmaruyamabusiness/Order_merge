@@ -152,6 +152,19 @@ function applyGanttOptions() {
     }
 }
 
+// 今日の位置変更時 → 日付指定欄の表示切替 + 再描画
+function onGanttPositionChange() {
+    const pos = document.getElementById('ganttTodayPosition').value;
+    const customContainer = document.getElementById('ganttCustomDateContainer');
+    if (customContainer) {
+        customContainer.style.display = pos === 'custom' ? 'flex' : 'none';
+    }
+    // custom選択時は日付入力待ち、それ以外は即再描画
+    if (pos !== 'custom') {
+        applyGanttOptions();
+    }
+}
+
 // ガントチャート印刷
 function printGanttChart() {
     const canvas = document.getElementById('ganttChart');
@@ -410,6 +423,25 @@ function renderGanttChart(data) {
         rangeStart.setMonth(today.getMonth() - spanMonths);
         rangeEnd = new Date(today);
         rangeEnd.setDate(today.getDate() + 7); // 少し余白
+    } else if (todayPosition === 'left') {
+        // 今日が左端 → 未来をスパン分表示
+        rangeStart = new Date(today);
+        rangeStart.setDate(today.getDate() - 7); // 少し余白
+        rangeEnd = new Date(today);
+        rangeEnd.setMonth(today.getMonth() + spanMonths);
+    } else if (todayPosition === 'custom') {
+        // 日付指定 → 指定日からスパン分表示
+        const customDateEl = document.getElementById('ganttCustomStartDate');
+        const customDateVal = customDateEl ? customDateEl.value : '';
+        if (customDateVal) {
+            rangeStart = new Date(customDateVal);
+            rangeStart.setHours(0, 0, 0, 0);
+        } else {
+            rangeStart = new Date(today);
+            rangeStart.setMonth(today.getMonth() - spanMonths);
+        }
+        rangeEnd = new Date(rangeStart);
+        rangeEnd.setMonth(rangeStart.getMonth() + spanMonths);
     } else {
         // 中央（前後均等）
         rangeStart = new Date(today);
@@ -441,9 +473,8 @@ function renderGanttChart(data) {
     }
     
     if (filteredData.length === 0) {
-        const posLabel = todayPosition === 'right' ? '過去' : '前後';
         document.getElementById('ganttChartContainer').innerHTML =
-            `<p style="text-align: center; padding: 50px; color: #6c757d;">${posLabel}${spanMonths}ヶ月以内の納期データがありません</p>`;
+            `<p style="text-align: center; padding: 50px; color: #6c757d;">表示範囲（${rangeStart.toLocaleDateString('ja-JP')}～${rangeEnd.toLocaleDateString('ja-JP')}）に納期データがありません</p>`;
         return;
     }
     
@@ -517,7 +548,10 @@ function renderGanttChart(data) {
                 legend: { display: false },
                 title: {
                     display: true,
-                    text: `納期ガントチャート（${filteredData.length}件 / ${spanMonths}ヶ月${todayPosition === 'right' ? ' 過去' : ' 前後'}）`,
+                    text: `納期ガントチャート（${filteredData.length}件 / ${spanMonths}ヶ月 ${
+                        todayPosition === 'right' ? '過去メイン' :
+                        todayPosition === 'left' ? '未来メイン' :
+                        todayPosition === 'custom' ? '日付指定' : '前後均等'}）`,
                     font: { size: 16 }
                 },
                 tooltip: {
