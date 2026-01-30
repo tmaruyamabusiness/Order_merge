@@ -211,7 +211,7 @@ def create_label_on_sheet(ws, start_row, order):
 
     # URL説明テキスト + URL（マージセルの左上セルに全て記載）
     cell_url = ws.cell(row=r, column=4,
-                       value=f'受入ページ QRコード\n)
+                       value='受入ページ QRコード\n'
     cell_url.font = label_font
     cell_url.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
     cell_url.border = thin_border
