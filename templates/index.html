@@ -42,12 +42,12 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                         <h3>📊 納期ガントチャート</h3>
                         <button class="btn btn-info btn-sm" onclick="toggleGanttChart()">
-                            <span id="ganttToggleIcon">📉</span> <span id="ganttToggleText">非表示</span>
+                            <span id="ganttToggleIcon">📈</span> <span id="ganttToggleText">表示</span>
                         </button>
                     </div>
                     
                     <!-- 🔥 製番フィルタUI -->
-                    <div id="ganttFilterContainer" style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+                    <div id="ganttFilterContainer" style="display: none; background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
                         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
                             <strong>🔍 製番フィルタ:</strong>
                             <button class="btn btn-sm btn-primary" onclick="selectAllSeibansForGantt()">全て選択</button>
@@ -78,7 +78,7 @@
                         </div>
                     </div>
                     
-                    <div id="ganttChartContainer" style="position: relative; height: 400px; overflow-y: auto;">
+                    <div id="ganttChartContainer" style="display: none; position: relative; height: 400px; overflow-y: auto;">
                         <canvas id="ganttChart"></canvas>
                     </div>
                 </div>
@@ -1829,8 +1829,11 @@
                     });
                 });
 
-                // 🔥 ガントチャートを更新
-                updateGanttChart(orders);
+                // ガントチャートは表示中の場合のみ更新
+                const ganttContainer = document.getElementById('ganttChartContainer');
+                if (ganttContainer && ganttContainer.style.display !== 'none') {
+                    updateGanttChart(orders);
+                }
             } catch (error) {
                 console.error('Error loading orders:', error);
                 showToast('注文読み込みエラー: ' + error, 'error');
@@ -1884,17 +1887,31 @@
             }
         }
 
-        function toggleGanttChart() {
+        async function toggleGanttChart() {
             const container = document.getElementById('ganttChartContainer');
+            const filterContainer = document.getElementById('ganttFilterContainer');
             const icon = document.getElementById('ganttToggleIcon');
             const text = document.getElementById('ganttToggleText');
-            
+
             if (container.style.display === 'none') {
+                // 表示 → フィルタ・チャート領域を見せてからデータ読み込み
                 container.style.display = 'block';
+                filterContainer.style.display = 'block';
                 icon.textContent = '📉';
                 text.textContent = '非表示';
+
+                // ガントチャートを生成（ローディングゲージ付き）
+                try {
+                    const response = await fetch('/api/orders');
+                    const orders = await response.json();
+                    await updateGanttChart(orders);
+                } catch (error) {
+                    console.error('ガントチャート読み込みエラー:', error);
+                    showToast('ガントチャート読み込みエラー: ' + error, 'error');
+                }
             } else {
                 container.style.display = 'none';
+                filterContainer.style.display = 'none';
                 icon.textContent = '📈';
                 text.textContent = '表示';
             }
