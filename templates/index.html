@@ -15,6 +15,7 @@
     <script src="/static/gantt-chart.js"></script>
     <script src="/static/qr-scanner.js"></script>
     <script src="/static/pallet-manager.js"></script>
+    <script src="/static/delivery-schedule.js"></script>
 </head>
 <body>
     <div class="container">
@@ -269,7 +270,21 @@
             <!-- 入荷管理タブ -->
             <div id="receiving-tab" class="tab-content">
                 <h2>📦 入荷管理</h2>
-                
+
+                <!-- 納品予定表 -->
+                <div class="card" style="margin-bottom: 20px; padding: 20px; background: white; border: 1px solid #dee2e6; border-radius: 10px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                        <h3 style="margin: 0;">📅 納品予定（今日〜1週間）</h3>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn btn-sm btn-primary" onclick="loadDeliverySchedule()">更新</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="printDeliverySchedule()" style="border: 1px solid #6c757d; background: white;">🖨 印刷</button>
+                        </div>
+                    </div>
+                    <div id="deliveryScheduleContent">
+                        <p style="text-align: center; padding: 20px; color: #6c757d;">「更新」ボタンを押して納品予定を読み込みます</p>
+                    </div>
+                </div>
+
                 <!-- 発注番号での検索・受入 -->
                 <div class="card" style="margin-bottom: 20px; padding: 20px; background: #f8f9fa; border-radius: 10px;">
                     <h3>🔍 発注番号で検索・受入</h3>
@@ -1297,6 +1312,8 @@
             
             if (tabName === 'orders') {
                 loadOrders();
+            } else if (tabName === 'receiving') {
+                loadDeliverySchedule();
             } else if (tabName === 'archive') {
                 loadArchivedOrders();
             }
