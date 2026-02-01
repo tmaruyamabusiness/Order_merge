@@ -1,0 +1,194 @@
+// ========================================
+// 納品予定表（今日 + 1週間）
+// ========================================
+
+let deliveryScheduleData = null;
+
+// 納品予定を読み込み
+async function loadDeliverySchedule() {
+    const container = document.getElementById('deliveryScheduleContent');
+    if (!container) return;
+
+    container.innerHTML = '<p style="text-align: center; padding: 20px; color: #6c757d;">読み込み中...</p>';
+
+    try {
+        const response = await fetch('/api/delivery-schedule');
+        const data = await response.json();
+
+        if (!data.success) {
+            container.innerHTML = `<p style="color: #dc3545;">エラー: ${data.error}</p>`;
+            return;
+        }
+
+        deliveryScheduleData = data;
+        renderDeliverySchedule(data);
+    } catch (error) {
+        container.innerHTML = `<p style="color: #dc3545;">読み込みエラー: ${error}</p>`;
+    }
+}
+
+// 納品予定を描画
+function renderDeliverySchedule(data) {
+    const container = document.getElementById('deliveryScheduleContent');
+    if (!container) return;
+
+    if (data.days.length === 0) {
+        container.innerHTML = '<p style="text-align: center; padding: 20px; color: #6c757d;">今後1週間の納品予定はありません</p>';
+        return;
+    }
+
+    let html = '';
+
+    // サマリーバー
+    const todayData = data.days.find(d => d.is_today);
+    const todayCount = todayData ? todayData.total : 0;
+    const todayReceived = todayData ? todayData.received : 0;
+    html += `<div style="display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px; background: ${todayCount > 0 ? '#fff3cd' : '#d4edda'}; padding: 12px 18px; border-radius: 8px; border-left: 4px solid ${todayCount > 0 ? '#ffc107' : '#28a745'};">
+            <div style="font-size: 0.85em; color: #666;">今日の納品</div>
+            <div style="font-size: 1.8em; font-weight: bold; color: ${todayCount > 0 ? '#856404' : '#155724'};">${todayCount}件</div>
+            <div style="font-size: 0.8em; color: #888;">受入済: ${todayReceived}件</div>
+        </div>
+        <div style="flex: 1; min-width: 200px; background: #e8f4ff; padding: 12px 18px; border-radius: 8px; border-left: 4px solid #007bff;">
+            <div style="font-size: 0.85em; color: #666;">1週間合計</div>
+            <div style="font-size: 1.8em; font-weight: bold; color: #004085;">${data.total_items}件</div>
+            <div style="font-size: 0.8em; color: #888;">${data.days.length}日間に分散</div>
+        </div>
+    </div>`;
+
+    // 日ごとのセクション
+    data.days.forEach(day => {
+        const bgColor = day.is_today ? '#fffbea' : day.is_weekend ? '#fff0f0' : '#ffffff';
+        const borderColor = day.is_today ? '#ffc107' : day.is_weekend ? '#ffcccc' : '#dee2e6';
+        const todayBadge = day.is_today ? '<span style="background: #ffc107; color: #333; padding: 2px 8px; border-radius: 10px; font-size: 0.75em; font-weight: bold; margin-left: 8px;">TODAY</span>' : '';
+        const weekendBadge = day.is_weekend ? '<span style="background: #ffcccc; color: #cc0000; padding: 2px 8px; border-radius: 10px; font-size: 0.75em; margin-left: 8px;">休日</span>' : '';
+
+        html += `<div style="background: ${bgColor}; border: 1px solid ${borderColor}; border-radius: 8px; margin-bottom: 10px; overflow: hidden;">`;
+        html += `<div style="padding: 10px 15px; background: ${day.is_today ? '#fff3cd' : '#f8f9fa'}; border-bottom: 1px solid ${borderColor}; display: flex; align-items: center; justify-content: space-between; cursor: pointer;" onclick="toggleDeliveryDay('${day.date}')">`;
+        html += `<div><strong style="font-size: 1.1em;">${day.display_date}</strong>${todayBadge}${weekendBadge}</div>`;
+        html += `<div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 0.9em; color: #666;">${day.received}/${day.total} 受入済</span>
+            <span style="background: ${day.received === day.total ? '#28a745' : '#007bff'}; color: white; padding: 2px 10px; border-radius: 12px; font-weight: bold;">${day.total}件</span>
+            <span id="deliveryDayArrow_${day.date}" style="transition: transform 0.2s;">&#9660;</span>
+        </div>`;
+        html += `</div>`;
+
+        // 明細テーブル（今日はデフォルト展開、他は折りたたみ）
+        const display = day.is_today ? 'block' : 'none';
+        html += `<div id="deliveryDay_${day.date}" style="display: ${display}; padding: 0;">`;
+        html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.88em;">`;
+        html += `<thead><tr style="background: #f1f3f5;">
+            <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #ddd;">状態</th>
+            <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #ddd;">製番</th>
+            <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #ddd;">仕入先</th>
+            <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #ddd;">品名</th>
+            <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #ddd;">仕様１</th>
+            <th style="padding: 6px 10px; text-align: right; border-bottom: 1px solid #ddd;">数量</th>
+            <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #ddd;">発注番号</th>
+        </tr></thead><tbody>`;
+
+        // 製番でグループ化して表示
+        const grouped = {};
+        day.items.forEach(item => {
+            const key = item.seiban;
+            if (!grouped[key]) grouped[key] = [];
+            grouped[key].push(item);
+        });
+
+        Object.keys(grouped).sort().forEach(seiban => {
+            grouped[seiban].forEach(item => {
+                const receivedStyle = item.is_received
+                    ? 'background: #d4edda; color: #155724;'
+                    : '';
+                const badge = item.is_received
+                    ? '<span style="color: #28a745; font-weight: bold;">&#10003;</span>'
+                    : '<span style="color: #dc3545;">&#9675;</span>';
+
+                html += `<tr style="${receivedStyle} border-bottom: 1px solid #eee;">
+                    <td style="padding: 5px 10px; text-align: center;">${badge}</td>
+                    <td style="padding: 5px 10px; white-space: nowrap;">${item.seiban}</td>
+                    <td style="padding: 5px 10px;">${item.supplier}</td>
+                    <td style="padding: 5px 10px;">${item.item_name}</td>
+                    <td style="padding: 5px 10px; font-size: 0.85em;">${item.spec1}</td>
+                    <td style="padding: 5px 10px; text-align: right;">${item.quantity} ${item.unit_measure}</td>
+                    <td style="padding: 5px 10px;">${item.order_number}</td>
+                </tr>`;
+            });
+        });
+
+        html += `</tbody></table></div></div>`;
+    });
+
+    container.innerHTML = html;
+}
+
+// 日ごとの折りたたみ切替
+function toggleDeliveryDay(dateKey) {
+    const el = document.getElementById('deliveryDay_' + dateKey);
+    const arrow = document.getElementById('deliveryDayArrow_' + dateKey);
+    if (!el) return;
+
+    if (el.style.display === 'none') {
+        el.style.display = 'block';
+        if (arrow) arrow.style.transform = 'rotate(0deg)';
+    } else {
+        el.style.display = 'none';
+        if (arrow) arrow.style.transform = 'rotate(-90deg)';
+    }
+}
+
+// 納品予定を印刷
+function printDeliverySchedule() {
+    if (!deliveryScheduleData || deliveryScheduleData.days.length === 0) {
+        alert('納品予定データがありません');
+        return;
+    }
+
+    const data = deliveryScheduleData;
+    const now = new Date().toLocaleString('ja-JP');
+
+    let tableRows = '';
+    data.days.forEach(day => {
+        // 日付ヘッダー行
+        const todayMark = day.is_today ? ' [TODAY]' : '';
+        tableRows += `<tr style="background: ${day.is_today ? '#fff3cd' : '#e9ecef'};">
+            <td colspan="7" style="padding: 8px; font-weight: bold; font-size: 1.1em; border: 1px solid #ccc;">
+                ${day.display_date}${todayMark} - ${day.total}件 (受入済: ${day.received})
+            </td></tr>`;
+
+        day.items.forEach(item => {
+            const mark = item.is_received ? '&#10003;' : '';
+            tableRows += `<tr style="${item.is_received ? 'background: #e8f5e9;' : ''}">
+                <td style="padding: 4px 8px; border: 1px solid #ccc; text-align: center;">${mark}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item.seiban}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item.supplier}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item.item_name}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item.spec1}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc; text-align: right;">${item.quantity} ${item.unit_measure}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item.order_number}</td>
+            </tr>`;
+        });
+    });
+
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`<!DOCTYPE html><html><head><title>納品予定表</title>
+        <style>
+            @media print { @page { size: landscape; margin: 8mm; } body { margin: 0; } }
+            body { font-family: 'Meiryo', sans-serif; font-size: 11px; }
+            h2 { margin: 0 0 5px 0; }
+            .info { font-size: 0.85em; color: #666; margin-bottom: 10px; }
+            table { width: 100%; border-collapse: collapse; }
+            th { background: #343a40; color: white; padding: 6px 8px; border: 1px solid #ccc; text-align: left; }
+        </style></head><body>
+        <h2>納品予定表</h2>
+        <div class="info">印刷日時: ${now} ／ 合計: ${data.total_items}件</div>
+        <table>
+            <thead><tr>
+                <th style="width:30px;">済</th><th>製番</th><th>仕入先</th><th>品名</th><th>仕様１</th><th>数量</th><th>発注番号</th>
+            </tr></thead>
+            <tbody>${tableRows}</tbody>
+        </table>
+        <script>window.onload = function() { window.print(); window.close(); };</script>
+    </body></html>`);
+    printWindow.document.close();
+}

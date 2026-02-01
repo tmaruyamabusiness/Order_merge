@@ -2404,6 +2404,108 @@ def get_orders():
         print(traceback.print_exc())
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/delivery-schedule')
+def get_delivery_schedule():
+    """今日の納品リストと1週間の予定を取得"""
+    try:
+        from datetime import date, timedelta
+
+        today = date.today()
+        week_end = today + timedelta(days=7)
+
+        # 全アクティブ注文の詳細を取得
+        orders = Order.query.filter_by(is_archived=False).all()
+
+        schedule = {}  # {date_str: [items]}
+
+        for order in orders:
+            for detail in order.details:
+                if not detail.delivery_date or detail.delivery_date.strip() == '' or detail.delivery_date == '-':
+                    continue
+
+                parsed = _parse_delivery_date_to_date(detail.delivery_date)
+                if not parsed:
+                    continue
+
+                if parsed < today or parsed > week_end:
+                    continue
+
+                date_key = parsed.isoformat()
+                if date_key not in schedule:
+                    schedule[date_key] = []
+
+                schedule[date_key].append({
+                    'detail_id': detail.id,
+                    'order_id': order.id,
+                    'seiban': order.seiban,
+                    'unit': order.unit or '',
+                    'item_name': detail.item_name or '',
+                    'spec1': detail.spec1 or '',
+                    'spec2': detail.spec2 or '',
+                    'supplier': detail.supplier or '',
+                    'order_number': detail.order_number or '',
+                    'quantity': detail.quantity or 0,
+                    'unit_measure': detail.unit_measure or '',
+                    'is_received': detail.is_received,
+                    'delivery_date': detail.delivery_date,
+                    'order_type': detail.order_type or '',
+                    'product_name': order.product_name or '',
+                    'customer_abbr': order.customer_abbr or ''
+                })
+
+        # 日付順にソート
+        result = []
+        for date_key in sorted(schedule.keys()):
+            items = schedule[date_key]
+            parsed_date = date.fromisoformat(date_key)
+            weekday_names = ['月', '火', '水', '木', '金', '土', '日']
+            weekday = weekday_names[parsed_date.weekday()]
+
+            result.append({
+                'date': date_key,
+                'display_date': f"{parsed_date.month}/{parsed_date.day}({weekday})",
+                'is_today': parsed_date == today,
+                'is_weekend': parsed_date.weekday() >= 5,
+                'total': len(items),
+                'received': sum(1 for i in items if i['is_received']),
+                'items': items
+            })
+
+        return jsonify({
+            'success': True,
+            'today': today.isoformat(),
+            'week_end': week_end.isoformat(),
+            'days': result,
+            'total_items': sum(len(d['items']) for d in result)
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _parse_delivery_date_to_date(date_str):
+    """納期文字列をdateオブジェクトに変換"""
+    from datetime import date
+    import re
+    if not date_str:
+        return None
+    # YY/MM/DD
+    m = re.match(r'^(\d{2})/(\d{1,2})/(\d{1,2})$', date_str)
+    if m:
+        return date(2000 + int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    # YYYY/MM/DD
+    m = re.match(r'^(\d{4})/(\d{1,2})/(\d{1,2})$', date_str)
+    if m:
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    # YYYY-MM-DD
+    m = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})$', date_str)
+    if m:
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    return None
+
+
 @app.route('/api/orders/gantt-data')
 def get_gantt_data():
     """ガントチャート用に最適化された納期データを一括取得"""
