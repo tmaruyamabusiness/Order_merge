@@ -2469,23 +2469,15 @@ def get_delivery_schedule():
                            '加工用ブランク' in str(detail.order_type or ''))
                 if is_blank:
                     from utils.mekki_utils import MekkiUtils
-                    # parent_idで子を検索
-                    children = OrderDetail.query.filter_by(parent_id=detail.id).all()
-                    # 子が見つからない場合、同じ注文内の追加工を検索（フォールバック）
-                    if not children:
-                        children = [d for d in order.details
-                                    if d.id != detail.id and
-                                    (str(d.order_type_code or '').strip() == '11' or
-                                     '追加工' in str(d.order_type or '')) and
-                                    d.parent_id is None]
-                    for child in children:
+                    # parent_idで直接の子のみ検索（1ブランク = 1追加工）
+                    child = OrderDetail.query.filter_by(parent_id=detail.id).first()
+                    if child:
                         step = {
                             'supplier': child.supplier or '',
                             'item_name': child.item_name or '',
                             'order_type': child.order_type or '',
                             'is_mekki': False
                         }
-                        # メッキ判定
                         if MekkiUtils.is_mekki_target(child.supplier_cd, child.spec2, child.spec1):
                             step['is_mekki'] = True
                         next_steps.append(step)
