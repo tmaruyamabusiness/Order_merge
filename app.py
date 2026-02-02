@@ -2421,7 +2421,16 @@ def get_delivery_schedule():
     try:
         from datetime import date, timedelta
 
-        today = date.today()
+        # カスタム開始日対応
+        start_date_str = request.args.get('start_date', '')
+        if start_date_str:
+            try:
+                parts = start_date_str.split('-')
+                today = date(int(parts[0]), int(parts[1]), int(parts[2]))
+            except (ValueError, IndexError):
+                today = date.today()
+        else:
+            today = date.today()
         week_end = today + timedelta(days=7)
 
         # 全アクティブ注文の詳細を取得
@@ -2445,6 +2454,23 @@ def get_delivery_schedule():
                 if date_key not in schedule:
                     schedule[date_key] = []
 
+                # 加工用ブランクの場合、子（追加工）の処理ステップを取得
+                next_steps = []
+                if detail.order_type_code == '13':  # 加工用ブランク
+                    children = OrderDetail.query.filter_by(parent_id=detail.id).all()
+                    for child in children:
+                        step = {
+                            'supplier': child.supplier or '',
+                            'item_name': child.item_name or '',
+                            'order_type': child.order_type or '',
+                            'is_mekki': False
+                        }
+                        # メッキ判定
+                        from utils.mekki_utils import MekkiUtils
+                        if MekkiUtils.is_mekki_target(child.supplier_cd, child.spec2, child.spec1):
+                            step['is_mekki'] = True
+                        next_steps.append(step)
+
                 schedule[date_key].append({
                     'detail_id': detail.id,
                     'order_id': order.id,
@@ -2460,9 +2486,11 @@ def get_delivery_schedule():
                     'is_received': detail.is_received,
                     'delivery_date': detail.delivery_date,
                     'order_type': detail.order_type or '',
+                    'order_type_code': detail.order_type_code or '',
                     'product_name': order.product_name or '',
                     'customer_abbr': order.customer_abbr or '',
-                    'cad_link': _get_cad_hyperlink(detail.spec1 or '') or ''
+                    'cad_link': _get_cad_hyperlink(detail.spec1 or '') or '',
+                    'next_steps': next_steps
                 })
 
         # 日付順にソート
@@ -2476,7 +2504,7 @@ def get_delivery_schedule():
             result.append({
                 'date': date_key,
                 'display_date': f"{parsed_date.month}/{parsed_date.day}({weekday})",
-                'is_today': parsed_date == today,
+                'is_today': parsed_date == date.today(),
                 'is_weekend': parsed_date.weekday() >= 5,
                 'total': len(items),
                 'received': sum(1 for i in items if i['is_received']),
@@ -2485,7 +2513,8 @@ def get_delivery_schedule():
 
         return jsonify({
             'success': True,
-            'today': today.isoformat(),
+            'start_date': today.isoformat(),
+            'today': date.today().isoformat(),
             'week_end': week_end.isoformat(),
             'days': result,
             'total_items': sum(len(d['items']) for d in result)
