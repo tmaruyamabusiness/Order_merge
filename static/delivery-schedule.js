@@ -27,6 +27,35 @@ async function loadDeliverySchedule() {
     }
 }
 
+// 納品予定の受入トグル
+async function toggleDeliveryReceive(detailId, btnElement) {
+    if (!btnElement) return;
+    const origText = btnElement.textContent;
+    btnElement.disabled = true;
+    btnElement.textContent = '...';
+
+    try {
+        const response = await fetch(`/api/detail/${detailId}/toggle-receive`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            // データ更新して再描画
+            loadDeliverySchedule();
+        } else {
+            alert('エラー: ' + (result.error || '受入処理に失敗'));
+            btnElement.disabled = false;
+            btnElement.textContent = origText;
+        }
+    } catch (error) {
+        alert('通信エラー: ' + error);
+        btnElement.disabled = false;
+        btnElement.textContent = origText;
+    }
+}
+
 // 納品予定を描画
 function renderDeliverySchedule(data) {
     const container = document.getElementById('deliveryScheduleContent');
@@ -78,11 +107,13 @@ function renderDeliverySchedule(data) {
         html += `<div id="deliveryDay_${day.date}" style="display: ${display}; padding: 0;">`;
         html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.88em;">`;
         html += `<thead><tr style="background: #f1f3f5;">
-            <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #ddd;">状態</th>
+            <th style="padding: 6px 10px; text-align: center; border-bottom: 1px solid #ddd; width: 70px;">受入</th>
             <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #ddd;">製番</th>
+            <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #ddd;">ユニット</th>
             <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #ddd;">仕入先</th>
             <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #ddd;">品名</th>
             <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #ddd;">仕様１</th>
+            <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #ddd;">手配区分</th>
             <th style="padding: 6px 10px; text-align: right; border-bottom: 1px solid #ddd;">数量</th>
             <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #ddd;">発注番号</th>
         </tr></thead><tbody>`;
@@ -98,18 +129,20 @@ function renderDeliverySchedule(data) {
         Object.keys(grouped).sort().forEach(seiban => {
             grouped[seiban].forEach(item => {
                 const receivedStyle = item.is_received
-                    ? 'background: #d4edda; color: #155724;'
+                    ? 'background: #d4edda;'
                     : '';
-                const badge = item.is_received
-                    ? '<span style="color: #28a745; font-weight: bold;">&#10003;</span>'
-                    : '<span style="color: #dc3545;">&#9675;</span>';
+                const btn = item.is_received
+                    ? `<button onclick="toggleDeliveryReceive(${item.detail_id}, this)" style="padding: 2px 8px; border: 1px solid #dc3545; background: #fff; color: #dc3545; border-radius: 4px; cursor: pointer; font-size: 0.82em; white-space: nowrap;">取消</button>`
+                    : `<button onclick="toggleDeliveryReceive(${item.detail_id}, this)" style="padding: 2px 8px; border: 1px solid #28a745; background: #28a745; color: #fff; border-radius: 4px; cursor: pointer; font-size: 0.82em; white-space: nowrap;">受入</button>`;
 
                 html += `<tr style="${receivedStyle} border-bottom: 1px solid #eee;">
-                    <td style="padding: 5px 10px; text-align: center;">${badge}</td>
+                    <td style="padding: 5px 10px; text-align: center;">${btn}</td>
                     <td style="padding: 5px 10px; white-space: nowrap;">${item.seiban}</td>
+                    <td style="padding: 5px 10px; font-size: 0.9em;">${item.unit}</td>
                     <td style="padding: 5px 10px;">${item.supplier}</td>
                     <td style="padding: 5px 10px;">${item.item_name}</td>
                     <td style="padding: 5px 10px; font-size: 0.85em;">${item.spec1}</td>
+                    <td style="padding: 5px 10px; font-size: 0.85em;">${item.order_type}</td>
                     <td style="padding: 5px 10px; text-align: right;">${item.quantity} ${item.unit_measure}</td>
                     <td style="padding: 5px 10px;">${item.order_number}</td>
                 </tr>`;
@@ -152,7 +185,7 @@ function printDeliverySchedule() {
         // 日付ヘッダー行
         const todayMark = day.is_today ? ' [TODAY]' : '';
         tableRows += `<tr style="background: ${day.is_today ? '#fff3cd' : '#e9ecef'};">
-            <td colspan="7" style="padding: 8px; font-weight: bold; font-size: 1.1em; border: 1px solid #ccc;">
+            <td colspan="9" style="padding: 8px; font-weight: bold; font-size: 1.1em; border: 1px solid #ccc;">
                 ${day.display_date}${todayMark} - ${day.total}件 (受入済: ${day.received})
             </td></tr>`;
 
@@ -161,9 +194,11 @@ function printDeliverySchedule() {
             tableRows += `<tr style="${item.is_received ? 'background: #e8f5e9;' : ''}">
                 <td style="padding: 4px 8px; border: 1px solid #ccc; text-align: center;">${mark}</td>
                 <td style="padding: 4px 8px; border: 1px solid #ccc;">${item.seiban}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item.unit}</td>
                 <td style="padding: 4px 8px; border: 1px solid #ccc;">${item.supplier}</td>
                 <td style="padding: 4px 8px; border: 1px solid #ccc;">${item.item_name}</td>
                 <td style="padding: 4px 8px; border: 1px solid #ccc;">${item.spec1}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item.order_type}</td>
                 <td style="padding: 4px 8px; border: 1px solid #ccc; text-align: right;">${item.quantity} ${item.unit_measure}</td>
                 <td style="padding: 4px 8px; border: 1px solid #ccc;">${item.order_number}</td>
             </tr>`;
@@ -184,7 +219,7 @@ function printDeliverySchedule() {
         <div class="info">印刷日時: ${now} ／ 合計: ${data.total_items}件</div>
         <table>
             <thead><tr>
-                <th style="width:30px;">済</th><th>製番</th><th>仕入先</th><th>品名</th><th>仕様１</th><th>数量</th><th>発注番号</th>
+                <th style="width:30px;">済</th><th>製番</th><th>ユニット</th><th>仕入先</th><th>品名</th><th>仕様１</th><th>手配区分</th><th>数量</th><th>発注番号</th>
             </tr></thead>
             <tbody>${tableRows}</tbody>
         </table>
