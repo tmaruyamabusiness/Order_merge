@@ -189,16 +189,33 @@
                     <div id="singleModeInput">
                         <div class="form-group">
                             <label>製番 (一覧から選択 または 手動入力):</label>
-                            <div style="display: flex; gap: 8px; align-items: center;">
-                                <select id="seibanSelect" onchange="onSeibanSelect()" style="flex: 2; padding: 8px;">
-                                    <option value="">-- 一覧から選択 --</option>
-                                </select>
+                            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px;">
+                                <input type="text" id="seibanFilterInput" placeholder="絞り込み（例: MHT0620）" oninput="filterSeibanCheckboxes()" style="flex: 1; padding: 6px 8px;">
                                 <button class="btn btn-secondary" onclick="loadSeibanList()" style="white-space: nowrap; padding: 8px 12px;">一覧取得</button>
                             </div>
-                            <input type="text" id="seibanInput" placeholder="MHT0123（手動入力も可）" style="margin-top: 6px;">
-                            <small style="color: #666;">一覧から選択するか、直接入力してください</small>
+                            <div id="seibanCheckboxList" style="display: none; max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 8px; border-radius: 5px; margin-bottom: 6px; background: #fff;">
+                            </div>
+                            <div id="seibanBatchActions" style="display: none; margin-bottom: 8px;">
+                                <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+                                    <button class="btn btn-sm btn-primary" onclick="selectAllSeibanCheckboxes()">全選択</button>
+                                    <button class="btn btn-sm btn-secondary" onclick="deselectAllSeibanCheckboxes()">全解除</button>
+                                    <span id="seibanCheckCount" style="color: #666; font-size: 0.85em; margin-left: 5px;"></span>
+                                    <button class="btn btn-success" onclick="processBatchSeibans()" style="margin-left: auto; padding: 6px 16px;">一括処理</button>
+                                </div>
+                            </div>
+                            <input type="text" id="seibanInput" placeholder="MHT0123（手動入力も可）" style="margin-top: 4px;">
+                            <small style="color: #666;">一覧からチェックして一括処理、または手動入力で単体処理</small>
                         </div>
-                        <button class="btn btn-primary" onclick="processFile()">処理開始</button>
+                        <button class="btn btn-primary" onclick="processFile()">処理開始（手動入力）</button>
+                        <div id="batchProgressContainer" style="display: none; margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                            <div style="margin-bottom: 8px;"><strong id="batchProgressTitle">一括処理中...</strong></div>
+                            <div style="background: #e9ecef; border-radius: 10px; overflow: hidden; height: 24px; margin-bottom: 8px;">
+                                <div id="batchProgressBar" style="height: 100%; background: linear-gradient(135deg, #28a745, #20c997); width: 0%; transition: width 0.3s; display: flex; align-items: center; justify-content: center;">
+                                    <span id="batchProgressPercent" style="color: white; font-weight: bold; font-size: 0.85em;"></span>
+                                </div>
+                            </div>
+                            <div id="batchProgressLog" style="font-size: 0.85em; color: #555; max-height: 150px; overflow-y: auto;"></div>
+                        </div>
                     </div>
                     
                     <!-- 自動検出モード -->
@@ -1656,36 +1673,166 @@
             }
         }
 
-        // 製番一覧を取得してドロップダウンに表示
+        // 製番一覧を取得してチェックボックスリストに表示
+        let seibanListItems = [];  // 全アイテム保持用
         async function loadSeibanList() {
-            const select = document.getElementById('seibanSelect');
-            select.innerHTML = '<option value="">読み込み中...</option>';
+            const listDiv = document.getElementById('seibanCheckboxList');
+            const actionsDiv = document.getElementById('seibanBatchActions');
+            listDiv.style.display = 'block';
+            listDiv.innerHTML = '<span style="color: #888;">読み込み中...</span>';
+            actionsDiv.style.display = 'none';
             try {
                 const response = await fetch('/api/seiban-list');
                 const data = await response.json();
-                select.innerHTML = '<option value="">-- 一覧から選択 --</option>';
                 if (data.success && data.items) {
-                    data.items.forEach(item => {
-                        const opt = document.createElement('option');
-                        opt.value = item.seiban;
-                        opt.textContent = `${item.seiban}  ${item.product_name}  (${item.customer_abbr})`;
-                        select.appendChild(opt);
-                    });
+                    seibanListItems = data.items;
+                    renderSeibanCheckboxes(data.items);
+                    actionsDiv.style.display = 'block';
                 } else {
+                    listDiv.innerHTML = '<span style="color: #dc3545;">取得失敗</span>';
                     alert('製番一覧の取得に失敗: ' + (data.error || '不明なエラー'));
                 }
             } catch (error) {
-                select.innerHTML = '<option value="">-- 一覧から選択 --</option>';
+                listDiv.innerHTML = '<span style="color: #dc3545;">取得エラー</span>';
                 alert('製番一覧の取得エラー: ' + error);
             }
         }
 
-        // ドロップダウン選択時にテキスト入力へ反映
-        function onSeibanSelect() {
-            const select = document.getElementById('seibanSelect');
-            if (select.value) {
-                document.getElementById('seibanInput').value = select.value;
+        // チェックボックスを描画
+        function renderSeibanCheckboxes(items) {
+            const listDiv = document.getElementById('seibanCheckboxList');
+            listDiv.innerHTML = '';
+            if (items.length === 0) {
+                listDiv.innerHTML = '<span style="color: #888;">該当なし</span>';
+                return;
             }
+            items.forEach(item => {
+                const label = document.createElement('label');
+                label.className = 'seiban-cb-label';
+                label.style.cssText = 'display: flex; align-items: center; padding: 4px 6px; cursor: pointer; border-radius: 4px; gap: 8px;';
+                label.setAttribute('data-seiban', item.seiban.toLowerCase());
+                label.innerHTML = `
+                    <input type="checkbox" class="seiban-cb" value="${item.seiban}" onchange="onSeibanCheckChange()" style="width: 18px; height: 18px; flex-shrink: 0;">
+                    <span style="font-weight: bold; white-space: nowrap;">${item.seiban}</span>
+                    <span style="color: #555; font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.product_name}</span>
+                    <span style="color: #888; font-size: 0.85em; white-space: nowrap;">(${item.customer_abbr})</span>`;
+                label.addEventListener('mouseenter', () => label.style.background = '#f0f0f0');
+                label.addEventListener('mouseleave', () => label.style.background = '');
+                listDiv.appendChild(label);
+            });
+            updateSeibanCheckCount();
+        }
+
+        // 絞り込み
+        function filterSeibanCheckboxes() {
+            const filter = document.getElementById('seibanFilterInput').value.toLowerCase();
+            document.querySelectorAll('.seiban-cb-label').forEach(label => {
+                const seiban = label.getAttribute('data-seiban');
+                label.style.display = seiban.includes(filter) ? 'flex' : 'none';
+            });
+        }
+
+        // 選択数表示を更新
+        function onSeibanCheckChange() {
+            updateSeibanCheckCount();
+            // 1個だけチェックされてたらテキスト欄にも反映
+            const checked = document.querySelectorAll('.seiban-cb:checked');
+            if (checked.length === 1) {
+                document.getElementById('seibanInput').value = checked[0].value;
+            }
+        }
+        function updateSeibanCheckCount() {
+            const total = document.querySelectorAll('.seiban-cb').length;
+            const checked = document.querySelectorAll('.seiban-cb:checked').length;
+            const el = document.getElementById('seibanCheckCount');
+            if (el) el.textContent = `${checked} / ${total} 選択中`;
+        }
+
+        // 全選択 / 全解除（表示中のみ）
+        function selectAllSeibanCheckboxes() {
+            document.querySelectorAll('.seiban-cb-label').forEach(label => {
+                if (label.style.display !== 'none') {
+                    label.querySelector('.seiban-cb').checked = true;
+                }
+            });
+            updateSeibanCheckCount();
+        }
+        function deselectAllSeibanCheckboxes() {
+            document.querySelectorAll('.seiban-cb').forEach(cb => cb.checked = false);
+            updateSeibanCheckCount();
+        }
+
+        // 一括処理
+        async function processBatchSeibans() {
+            const checked = [...document.querySelectorAll('.seiban-cb:checked')].map(cb => cb.value);
+            if (checked.length === 0) {
+                alert('製番を1つ以上選択してください');
+                return;
+            }
+
+            const sheet1 = document.getElementById('sheet1Select').value;
+            const sheet2 = document.getElementById('sheet2Select').value;
+
+            let orderDateFrom = null, orderDateTo = null;
+            if (document.getElementById('enableOrderDateFilter').checked) {
+                orderDateFrom = document.getElementById('orderDateFrom').value || null;
+                orderDateTo = document.getElementById('orderDateTo').value || null;
+            }
+
+            if (!confirm(`${checked.length}件の製番を一括処理します。\n\n${checked.join('\n')}\n\n実行しますか？`)) return;
+
+            const progressContainer = document.getElementById('batchProgressContainer');
+            const progressBar = document.getElementById('batchProgressBar');
+            const progressPercent = document.getElementById('batchProgressPercent');
+            const progressTitle = document.getElementById('batchProgressTitle');
+            const progressLog = document.getElementById('batchProgressLog');
+
+            progressContainer.style.display = 'block';
+            progressLog.innerHTML = '';
+            let successCount = 0, failCount = 0;
+
+            for (let i = 0; i < checked.length; i++) {
+                const seiban = checked[i];
+                const pct = Math.round(((i) / checked.length) * 100);
+                progressBar.style.width = pct + '%';
+                progressPercent.textContent = pct + '%';
+                progressTitle.textContent = `一括処理中... (${i + 1}/${checked.length}) ${seiban}`;
+
+                try {
+                    const requestBody = { filepath: currentFilePath, sheet1, sheet2, seiban };
+                    if (orderDateFrom) requestBody.order_date_from = orderDateFrom;
+                    if (orderDateTo) requestBody.order_date_to = orderDateTo;
+
+                    const response = await fetch('/api/process', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestBody)
+                    });
+                    const data = await response.json();
+
+                    if (data.success) {
+                        successCount++;
+                        progressLog.innerHTML += `<div style="color: #28a745;">✓ ${seiban}: ${data.message}</div>`;
+                    } else {
+                        failCount++;
+                        progressLog.innerHTML += `<div style="color: #dc3545;">✗ ${seiban}: ${data.error}</div>`;
+                    }
+                } catch (error) {
+                    failCount++;
+                    progressLog.innerHTML += `<div style="color: #dc3545;">✗ ${seiban}: ${error}</div>`;
+                }
+                progressLog.scrollTop = progressLog.scrollHeight;
+            }
+
+            progressBar.style.width = '100%';
+            progressPercent.textContent = '100%';
+            progressTitle.textContent = `完了！ 成功: ${successCount}件 / 失敗: ${failCount}件`;
+            progressBar.style.background = failCount === 0
+                ? 'linear-gradient(135deg, #28a745, #20c997)'
+                : 'linear-gradient(135deg, #ffc107, #fd7e14)';
+
+            loadOrders();
+            deselectAllSeibanCheckboxes();
         }
 
         // processFile関数を修正
@@ -1758,7 +1905,7 @@
                     
                     // フォームリセット
                     document.getElementById('seibanInput').value = '';
-                    document.getElementById('seibanSelect').selectedIndex = 0;
+                    deselectAllSeibanCheckboxes();
                     document.getElementById('sheetSelection').style.display = 'none';
                     document.getElementById('enableOrderDateFilter').checked = false;
                     document.getElementById('orderDateFilterInput').style.display = 'none';
