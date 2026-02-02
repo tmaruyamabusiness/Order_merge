@@ -1032,80 +1032,76 @@ def save_to_database(df, seiban_prefix):
                 
                 if blanks or processed:
                     print(f"\nグループ: 部品No={part_no}, ページNo={page_no}")
-                    print(f"ブランク（親）候補: {len(blanks)}個, 追加工（子）候補: {len(processed)}個")
+                    print(f"追加工（親）候補: {len(processed)}個, ブランク（子）候補: {len(blanks)}個")
                 
-                used_processed = set()
+                used_blanks = set()
 
-                # 🔥 行No.の差が100 かつ 階層が連続(N→N+1)している関係をマッチング
-                for blank_row in blanks:
-                    blank_row_no = safe_int(blank_row.get('行No', 0))
-                    blank_hierarchy = safe_int(blank_row.get('階層', 0))
+                # 🔥 追加工(11,階層1)が親 → ブランク(13,階層2)が子
+                # ルール: 追加工の行No < ブランクの行No <= 追加工の行No+300, 階層差=+1
+                for proc_row in processed:
+                    proc_row_no = safe_int(proc_row.get('行No', 0))
+                    proc_hierarchy = safe_int(proc_row.get('階層', 0))
 
-                    # 🔥 行No.の差が100 かつ 階層が連続しているものを探す
-                    matching_processed = None
+                    matching_blank = None
 
-                    for i, proc_row in enumerate(processed):
-                        if i in used_processed:
+                    for i, blank_row in enumerate(blanks):
+                        if i in used_blanks:
                             continue
 
-                        proc_row_no = safe_int(proc_row.get('行No', 0))
-                        proc_hierarchy = safe_int(proc_row.get('階層', 0))
-                        diff = abs(blank_row_no - proc_row_no)  # 絶対値
-                        hierarchy_diff = proc_hierarchy - blank_hierarchy  # 階層の差
+                        blank_row_no = safe_int(blank_row.get('行No', 0))
+                        blank_hierarchy = safe_int(blank_row.get('階層', 0))
 
-                        # 🔥 行No.の差が正確に100 かつ 階層が連続(N→N+1)の場合にマッチ
-                        if diff == 100 and hierarchy_diff == 1:
-                            matching_processed = (i, proc_row)
+                        # ブランクの行Noが追加工より大きく、300以内、階層が+1
+                        if (blank_row_no > proc_row_no and
+                            blank_row_no <= proc_row_no + 300 and
+                            blank_hierarchy == proc_hierarchy + 1):
+                            matching_blank = (i, blank_row)
                             break
 
-                    parent_detail = create_order_detail_with_parts(
-                        blank_row, order, all_received_items, safe_str, safe_int
-                    )
-                    db.session.add(parent_detail)
-                    db.session.flush()
+                    proc_name = safe_str(proc_row.get('品名', ''))
 
-                    blank_name = safe_str(blank_row.get('品名', ''))
+                    if matching_blank is not None:
+                        blank_idx, blank_row = matching_blank
+                        used_blanks.add(blank_idx)
 
-                    if matching_processed is not None:
-                        proc_idx, proc_row = matching_processed
-                        used_processed.add(proc_idx)
-
-                        child_detail = create_order_detail_with_parts(
+                        # 追加工(11)が親
+                        parent_detail = create_order_detail_with_parts(
                             proc_row, order, all_received_items, safe_str, safe_int
+                        )
+                        db.session.add(parent_detail)
+                        db.session.flush()
+
+                        # ブランク(13)が子
+                        child_detail = create_order_detail_with_parts(
+                            blank_row, order, all_received_items, safe_str, safe_int
                         )
                         child_detail.parent_id = parent_detail.id
                         db.session.add(child_detail)
 
-                        proc_name = safe_str(proc_row.get('品名', ''))
-                        proc_row_no = safe_int(proc_row.get('行No', 0))
-                        proc_hierarchy = safe_int(proc_row.get('階層', 0))
+                        blank_name = safe_str(blank_row.get('品名', ''))
+                        blank_row_no = safe_int(blank_row.get('行No', 0))
+                        blank_hierarchy = safe_int(blank_row.get('階層', 0))
 
-                        print(f"親子設定: 親({blank_name[:15]}, 行No={blank_row_no}, 階層={blank_hierarchy}) "
-                              f"→ 子({proc_name[:15]}, 行No={proc_row_no}, 階層={proc_hierarchy})")
+                        print(f"親子設定: 親・追加工({proc_name[:15]}, 行No={proc_row_no}, 階層={proc_hierarchy}) "
+                              f"→ 子・ブランク({blank_name[:15]}, 行No={blank_row_no}, 階層={blank_hierarchy})")
                     else:
-                        print(f"親のみ: {blank_name[:15]} (行No={blank_row_no}, 階層={blank_hierarchy}) - 対応する子なし")
-                
-                for i, proc_row in enumerate(processed):
-                    if i not in used_processed:
-                        order_type_code = safe_str(proc_row.get('手配区分CD', ''))
-                        spec1 = safe_str(proc_row.get('仕様１', ''))
-                        
-                        if (order_type_code == '15' and spec1 and spec1.strip() and re.match(r'^M\d', spec1)) or \
-                        (not spec1 or not spec1.strip()):
-                            if not spec1 or not spec1.strip():
-                                print(f"除外: {proc_name} (仕様1空欄) - 仕様1が未入力")
-                            else:
-                                print(f"除外: {proc_name} ({spec1}) - 在庫部品のM+数値")
-                            continue
-                        
+                        # 対応するブランクがない追加工は単独で保存
                         proc_detail = create_order_detail_with_parts(
                             proc_row, order, all_received_items, safe_str, safe_int
                         )
                         db.session.add(proc_detail)
-                        
-                        proc_name = safe_str(proc_row.get('品名', ''))
-                        proc_row_no = safe_int(proc_row.get('行No', 0))
-                        print(f"子のみ: {proc_name[:15]} (行No={proc_row_no}) - 対応する親なし")
+                        print(f"追加工のみ: {proc_name[:15]} (行No={proc_row_no}) - 対応するブランクなし")
+
+                # 未マッチのブランクを単独保存
+                for i, blank_row in enumerate(blanks):
+                    if i not in used_blanks:
+                        blank_detail = create_order_detail_with_parts(
+                            blank_row, order, all_received_items, safe_str, safe_int
+                        )
+                        db.session.add(blank_detail)
+                        blank_name = safe_str(blank_row.get('品名', ''))
+                        blank_row_no = safe_int(blank_row.get('行No', 0))
+                        print(f"ブランクのみ: {blank_name[:15]} (行No={blank_row_no}) - 対応する追加工なし")
                 
                 for row in others:
                     order_type_code = safe_str(row.get('手配区分CD', ''))
@@ -2476,22 +2472,23 @@ def get_delivery_schedule():
                 if date_key not in schedule:
                     schedule[date_key] = []
 
-                # 加工用ブランクの場合、子（追加工）の処理ステップを取得
+                # 加工用ブランクの場合、親（追加工）の処理先を取得
+                # DB構造: 追加工(11)=parent → ブランク(13)=child (parent_id)
                 next_steps = []
                 is_blank = (str(detail.order_type_code or '').strip() == '13' or
                            '加工用ブランク' in str(detail.order_type or ''))
-                if is_blank:
+                if is_blank and detail.parent_id:
                     from utils.mekki_utils import MekkiUtils
-                    # parent_idで直接の子のみ検索（1ブランク = 1追加工）
-                    child = OrderDetail.query.filter_by(parent_id=detail.id).first()
-                    if child:
+                    # ブランクの親（追加工）を取得 → 追加工の仕入先が次の加工先
+                    parent = OrderDetail.query.get(detail.parent_id)
+                    if parent:
                         step = {
-                            'supplier': child.supplier or '',
-                            'item_name': child.item_name or '',
-                            'order_type': child.order_type or '',
+                            'supplier': parent.supplier or '',
+                            'item_name': parent.item_name or '',
+                            'order_type': parent.order_type or '',
                             'is_mekki': False
                         }
-                        if MekkiUtils.is_mekki_target(child.supplier_cd, child.spec2, child.spec1):
+                        if MekkiUtils.is_mekki_target(parent.supplier_cd, parent.spec2, parent.spec1):
                             step['is_mekki'] = True
                         next_steps.append(step)
 
