@@ -861,23 +861,54 @@ def get_order_excel_data_path(seiban, product_name=None, customer_abbr=None):
     return str(export_dir / filename)
     
 def update_order_excel(order_id):
-    """注文IDに対応するExcelファイルを更新"""
+    """注文IDに対応するExcelファイルを更新（同じ製番の全ユニットを再生成）"""
+    import shutil
     try:
         order = db.session.get(Order, order_id)
         if not order:
             return False, "注文が見つかりません"
-        
+
         # 品名と客先名を渡す
         filepath = get_order_excel_path(order.seiban, order.product_name, order.customer_abbr)
-        success, error = save_order_to_excel(order, filepath)
-        
-        if success:
-            print(f"✅ Excel更新成功: {filepath}")
-        else:
-            print(f"❌ Excel更新失敗: {error}")
-        
-        return success, error
+        data_filepath = get_order_excel_data_path(order.seiban, order.product_name, order.customer_abbr)
+
+        # 同じ製番の全ユニットを取得
+        all_orders = Order.query.filter_by(seiban=order.seiban, is_archived=False).all()
+
+        # 新規ワークブック作成（全シート再生成）
+        wb = Workbook()
+        wb.remove(wb.active)
+
+        # ガントチャートシート作成
+        create_gantt_chart_sheet(wb, order.seiban, all_orders)
+
+        # 全ユニットのシートを作成
+        for unit_order in all_orders:
+            unit_display = unit_order.unit if unit_order.unit else 'ユニット名無し'
+            sheet_name = f"{unit_order.seiban}_{unit_display}"
+            sheet_name = re.sub(r'[\\\/\?\*\[\]:]', '', sheet_name)[:31]
+
+            ws = wb.create_sheet(sheet_name)
+            create_order_sheet(ws, unit_order, sheet_name)
+
+        # dataフォルダに保存
+        Path(data_filepath).parent.mkdir(parents=True, exist_ok=True)
+        wb.save(data_filepath)
+        wb.close()
+        print(f"✅ 全ユニットExcel保存完了: {data_filepath} ({len(all_orders)}シート)")
+
+        # メインファイルにコピー
+        try:
+            shutil.copy2(data_filepath, filepath)
+            print(f"✅ メインファイル更新: {filepath}")
+            return True, None
+        except PermissionError:
+            print(f"⚠️ メインファイル使用中（元データは保存済み）: {filepath}")
+            return True, "メインファイルは使用中ですが、元データは保存されました"
+
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return False, str(e)
     
 def save_to_database(df, seiban_prefix):
