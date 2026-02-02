@@ -1,5 +1,5 @@
 // ========================================
-// 納品予定表（今日 + 1週間）
+// 納品予定表（任意開始日 + 1週間）
 // ========================================
 
 let deliveryScheduleData = null;
@@ -12,7 +12,13 @@ async function loadDeliverySchedule() {
     container.innerHTML = '<p style="text-align: center; padding: 20px; color: #6c757d;">読み込み中...</p>';
 
     try {
-        const response = await fetch('/api/delivery-schedule');
+        let url = '/api/delivery-schedule';
+        const startDateInput = document.getElementById('deliveryStartDate');
+        if (startDateInput && startDateInput.value) {
+            url += '?start_date=' + startDateInput.value;
+        }
+
+        const response = await fetch(url);
         const data = await response.json();
 
         if (!data.success) {
@@ -25,6 +31,15 @@ async function loadDeliverySchedule() {
     } catch (error) {
         container.innerHTML = `<p style="color: #dc3545;">読み込みエラー: ${error}</p>`;
     }
+}
+
+// 開始日を今日にリセット
+function resetDeliveryStartDate() {
+    const input = document.getElementById('deliveryStartDate');
+    if (input) {
+        input.value = '';
+    }
+    loadDeliverySchedule();
 }
 
 // 納品予定の受入トグル
@@ -56,13 +71,35 @@ async function toggleDeliveryReceive(detailId, btnElement) {
     }
 }
 
+// NEXT処理ステップを生成
+function buildNextStepsHtml(item) {
+    if (!item.next_steps || item.next_steps.length === 0) return '';
+
+    let steps = '';
+    item.next_steps.forEach((step, idx) => {
+        if (idx > 0) steps += ' → ';
+        steps += step.supplier;
+        if (step.is_mekki) {
+            steps += ' → <span style="color: #dc3545; font-weight: bold;">⚠️メッキ出</span>';
+        }
+    });
+    steps += ' → 仕分 → 完了';
+
+    return `<tr style="background: #f0f8ff; border-bottom: 1px solid #eee;">
+        <td colspan="9" style="padding: 3px 10px 3px 30px; font-size: 0.82em; color: #555;">
+            <span style="background: #17a2b8; color: white; padding: 1px 6px; border-radius: 3px; font-size: 0.85em; margin-right: 5px;">NEXT</span>
+            ${steps}
+        </td>
+    </tr>`;
+}
+
 // 納品予定を描画
 function renderDeliverySchedule(data) {
     const container = document.getElementById('deliveryScheduleContent');
     if (!container) return;
 
     if (data.days.length === 0) {
-        container.innerHTML = '<p style="text-align: center; padding: 20px; color: #6c757d;">今後1週間の納品予定はありません</p>';
+        container.innerHTML = '<p style="text-align: center; padding: 20px; color: #6c757d;">指定期間の納品予定はありません</p>';
         return;
     }
 
@@ -79,7 +116,7 @@ function renderDeliverySchedule(data) {
             <div style="font-size: 0.8em; color: #888;">受入済: ${todayReceived}件</div>
         </div>
         <div style="flex: 1; min-width: 200px; background: #e8f4ff; padding: 12px 18px; border-radius: 8px; border-left: 4px solid #007bff;">
-            <div style="font-size: 0.85em; color: #666;">1週間合計</div>
+            <div style="font-size: 0.85em; color: #666;">期間合計</div>
             <div style="font-size: 1.8em; font-weight: bold; color: #004085;">${data.total_items}件</div>
             <div style="font-size: 0.8em; color: #888;">${data.days.length}日間に分散</div>
         </div>
@@ -142,6 +179,11 @@ function renderDeliverySchedule(data) {
                     spec1Cell = `<a href="${fileUrl}" target="_blank" style="color: #0000FF; text-decoration: underline;" title="${item.cad_link}">${item.spec1}</a>`;
                 }
 
+                // 加工用ブランクの場合、手配区分にバッジ表示
+                const orderTypeCell = item.order_type_code === '13'
+                    ? `<span style="background: #17a2b8; color: white; padding: 1px 5px; border-radius: 3px; font-size: 0.9em;">${item.order_type}</span>`
+                    : item.order_type;
+
                 html += `<tr style="${receivedStyle} border-bottom: 1px solid #eee;">
                     <td style="padding: 5px 10px; text-align: center;">${btn}</td>
                     <td style="padding: 5px 10px; white-space: nowrap;">${item.seiban}</td>
@@ -149,10 +191,15 @@ function renderDeliverySchedule(data) {
                     <td style="padding: 5px 10px;">${item.supplier}</td>
                     <td style="padding: 5px 10px;">${item.item_name}</td>
                     <td style="padding: 5px 10px; font-size: 0.85em;">${spec1Cell}</td>
-                    <td style="padding: 5px 10px; font-size: 0.85em;">${item.order_type}</td>
+                    <td style="padding: 5px 10px; font-size: 0.85em;">${orderTypeCell}</td>
                     <td style="padding: 5px 10px; text-align: right;">${item.quantity} ${item.unit_measure}</td>
                     <td style="padding: 5px 10px;">${item.order_number}</td>
                 </tr>`;
+
+                // 加工用ブランクの場合、NEXT処理ステップを表示
+                if (item.order_type_code === '13' && item.next_steps && item.next_steps.length > 0) {
+                    html += buildNextStepsHtml(item);
+                }
             });
         });
 
@@ -209,6 +256,22 @@ function printDeliverySchedule() {
                 <td style="padding: 4px 8px; border: 1px solid #ccc; text-align: right;">${item.quantity} ${item.unit_measure}</td>
                 <td style="padding: 4px 8px; border: 1px solid #ccc;">${item.order_number}</td>
             </tr>`;
+
+            // 印刷時もNEXTステップを表示
+            if (item.order_type_code === '13' && item.next_steps && item.next_steps.length > 0) {
+                let steps = '';
+                item.next_steps.forEach((step, idx) => {
+                    if (idx > 0) steps += ' → ';
+                    steps += step.supplier;
+                    if (step.is_mekki) steps += ' → ⚠メッキ出';
+                });
+                steps += ' → 仕分 → 完了';
+                tableRows += `<tr style="background: #f0f8ff;">
+                    <td colspan="9" style="padding: 3px 8px 3px 25px; border: 1px solid #ccc; font-size: 0.9em; color: #555;">
+                        NEXT: ${steps}
+                    </td>
+                </tr>`;
+            }
         });
     });
 
