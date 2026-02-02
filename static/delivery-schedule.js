@@ -135,13 +135,17 @@ function renderDeliverySchedule(data) {
                     ? `<button onclick="toggleDeliveryReceive(${item.detail_id}, this)" style="padding: 2px 8px; border: 1px solid #dc3545; background: #fff; color: #dc3545; border-radius: 4px; cursor: pointer; font-size: 0.82em; white-space: nowrap;">取消</button>`
                     : `<button onclick="toggleDeliveryReceive(${item.detail_id}, this)" style="padding: 2px 8px; border: 1px solid #28a745; background: #28a745; color: #fff; border-radius: 4px; cursor: pointer; font-size: 0.82em; white-space: nowrap;">受入</button>`;
 
+                const spec1Cell = item.cad_link
+                    ? `<a href="${item.cad_link}" target="_blank" style="color: #0000FF; text-decoration: underline;" title="${item.cad_link}">${item.spec1}</a>`
+                    : item.spec1;
+
                 html += `<tr style="${receivedStyle} border-bottom: 1px solid #eee;">
                     <td style="padding: 5px 10px; text-align: center;">${btn}</td>
                     <td style="padding: 5px 10px; white-space: nowrap;">${item.seiban}</td>
                     <td style="padding: 5px 10px; font-size: 0.9em;">${item.unit}</td>
                     <td style="padding: 5px 10px;">${item.supplier}</td>
                     <td style="padding: 5px 10px;">${item.item_name}</td>
-                    <td style="padding: 5px 10px; font-size: 0.85em;">${item.spec1}</td>
+                    <td style="padding: 5px 10px; font-size: 0.85em;">${spec1Cell}</td>
                     <td style="padding: 5px 10px; font-size: 0.85em;">${item.order_type}</td>
                     <td style="padding: 5px 10px; text-align: right;">${item.quantity} ${item.unit_measure}</td>
                     <td style="padding: 5px 10px;">${item.order_number}</td>
