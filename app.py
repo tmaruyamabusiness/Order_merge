@@ -2450,7 +2450,8 @@ def get_delivery_schedule():
                     'delivery_date': detail.delivery_date,
                     'order_type': detail.order_type or '',
                     'product_name': order.product_name or '',
-                    'customer_abbr': order.customer_abbr or ''
+                    'customer_abbr': order.customer_abbr or '',
+                    'cad_link': _get_cad_hyperlink(detail.spec1 or '') or ''
                 })
 
         # 日付順にソート
