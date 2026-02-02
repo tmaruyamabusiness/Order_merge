@@ -318,9 +318,21 @@ def _get_cad_hyperlink(spec1):
     if len(parts) < 2 or len(parts[0]) < 2:
         return None
     folder_letter = parts[0][1].upper()
+
+    import glob
+
+    # 1. I:\PDF を最初に検索
+    i_pdf_folder = r"I:\PDF"
+    try:
+        pdf_files = glob.glob(os.path.join(i_pdf_folder, f"{spec1}*.pdf"))
+        if pdf_files:
+            return pdf_files[0]
+    except Exception:
+        pass
+
+    # 2. SERVER3のCADフォルダ（PDF優先 → mx2 → フォルダ）
     cad_folder = f"\\\\SERVER3\\Share-data\\CadData\\Parts\\{folder_letter}"
     try:
-        import glob
         pdf_files = glob.glob(os.path.join(cad_folder, f"{spec1}*.pdf"))
         if pdf_files:
             return pdf_files[0]
