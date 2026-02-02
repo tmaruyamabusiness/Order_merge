@@ -180,7 +180,7 @@ function renderDeliverySchedule(data) {
                 }
 
                 // 加工用ブランクの場合、手配区分にバッジ表示
-                const orderTypeCell = item.order_type_code === '13'
+                const orderTypeCell = item.is_blank
                     ? `<span style="background: #17a2b8; color: white; padding: 1px 5px; border-radius: 3px; font-size: 0.9em;">${item.order_type}</span>`
                     : item.order_type;
 
@@ -197,8 +197,17 @@ function renderDeliverySchedule(data) {
                 </tr>`;
 
                 // 加工用ブランクの場合、NEXT処理ステップを表示
-                if (item.order_type_code === '13' && item.next_steps && item.next_steps.length > 0) {
-                    html += buildNextStepsHtml(item);
+                if (item.is_blank) {
+                    if (item.next_steps && item.next_steps.length > 0) {
+                        html += buildNextStepsHtml(item);
+                    } else {
+                        html += `<tr style="background: #fff8e1; border-bottom: 1px solid #eee;">
+                            <td colspan="9" style="padding: 3px 10px 3px 30px; font-size: 0.82em; color: #856404;">
+                                <span style="background: #ffc107; color: #333; padding: 1px 6px; border-radius: 3px; font-size: 0.85em; margin-right: 5px;">NEXT</span>
+                                → 追加工待ち → 仕分 → 完了
+                            </td>
+                        </tr>`;
+                    }
                 }
             });
         });
@@ -258,7 +267,7 @@ function printDeliverySchedule() {
             </tr>`;
 
             // 印刷時もNEXTステップを表示
-            if (item.order_type_code === '13' && item.next_steps && item.next_steps.length > 0) {
+            if (item.is_blank && item.next_steps && item.next_steps.length > 0) {
                 let steps = '';
                 item.next_steps.forEach((step, idx) => {
                     if (idx > 0) steps += ' → ';
@@ -269,6 +278,12 @@ function printDeliverySchedule() {
                 tableRows += `<tr style="background: #f0f8ff;">
                     <td colspan="9" style="padding: 3px 8px 3px 25px; border: 1px solid #ccc; font-size: 0.9em; color: #555;">
                         NEXT: ${steps}
+                    </td>
+                </tr>`;
+            } else if (item.is_blank) {
+                tableRows += `<tr style="background: #fff8e1;">
+                    <td colspan="9" style="padding: 3px 8px 3px 25px; border: 1px solid #ccc; font-size: 0.9em; color: #856404;">
+                        NEXT: → 追加工待ち → 仕分 → 完了
                     </td>
                 </tr>`;
             }

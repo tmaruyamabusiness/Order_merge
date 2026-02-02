@@ -1445,17 +1445,17 @@ def _get_cad_hyperlink(spec1):
 
     import glob
 
-    # 1. I:\PDF を最初に検索
-    i_pdf_folder = r"I:\PDF"
+    # 1. SERVER3のPDFフォルダを最初に検索
+    pdf_folder = r"\\server3\CadData\PDF"
     try:
-        pdf_files = glob.glob(os.path.join(i_pdf_folder, f"{spec1}*.pdf"))
+        pdf_files = glob.glob(os.path.join(pdf_folder, f"{spec1}*.pdf"))
         if pdf_files:
             return pdf_files[0]
     except Exception:
         pass
 
     # 2. SERVER3のCADフォルダ（PDF優先 → mx2 → フォルダ）
-    cad_folder = f"\\\\SERVER3\\Share-data\\CadData\\Parts\\{folder_letter}"
+    cad_folder = f"\\\\server3\\CadData\\Parts\\{folder_letter}"
     try:
         pdf_files = glob.glob(os.path.join(cad_folder, f"{spec1}*.pdf"))
         if pdf_files:
@@ -2456,8 +2456,19 @@ def get_delivery_schedule():
 
                 # 加工用ブランクの場合、子（追加工）の処理ステップを取得
                 next_steps = []
-                if detail.order_type_code == '13':  # 加工用ブランク
+                is_blank = (str(detail.order_type_code or '').strip() == '13' or
+                           '加工用ブランク' in str(detail.order_type or ''))
+                if is_blank:
+                    from utils.mekki_utils import MekkiUtils
+                    # parent_idで子を検索
                     children = OrderDetail.query.filter_by(parent_id=detail.id).all()
+                    # 子が見つからない場合、同じ注文内の追加工を検索（フォールバック）
+                    if not children:
+                        children = [d for d in order.details
+                                    if d.id != detail.id and
+                                    (str(d.order_type_code or '').strip() == '11' or
+                                     '追加工' in str(d.order_type or '')) and
+                                    d.parent_id is None]
                     for child in children:
                         step = {
                             'supplier': child.supplier or '',
@@ -2466,7 +2477,6 @@ def get_delivery_schedule():
                             'is_mekki': False
                         }
                         # メッキ判定
-                        from utils.mekki_utils import MekkiUtils
                         if MekkiUtils.is_mekki_target(child.supplier_cd, child.spec2, child.spec1):
                             step['is_mekki'] = True
                         next_steps.append(step)
@@ -2490,6 +2500,7 @@ def get_delivery_schedule():
                     'product_name': order.product_name or '',
                     'customer_abbr': order.customer_abbr or '',
                     'cad_link': _get_cad_hyperlink(detail.spec1 or '') or '',
+                    'is_blank': is_blank,
                     'next_steps': next_steps
                 })
 
