@@ -172,11 +172,10 @@ function renderDeliverySchedule(data) {
                     ? `<button onclick="toggleDeliveryReceive(${item.detail_id}, this)" style="padding: 2px 8px; border: 1px solid #dc3545; background: #fff; color: #dc3545; border-radius: 4px; cursor: pointer; font-size: 0.82em; white-space: nowrap;">取消</button>`
                     : `<button onclick="toggleDeliveryReceive(${item.detail_id}, this)" style="padding: 2px 8px; border: 1px solid #28a745; background: #28a745; color: #fff; border-radius: 4px; cursor: pointer; font-size: 0.82em; white-space: nowrap;">受入</button>`;
 
-                // UNC/ローカルパスをfile:///形式に変換
+                // /api/open-cad/ エンドポイントでCADファイルを表示
                 let spec1Cell = item.spec1;
                 if (item.cad_link) {
-                    const fileUrl = 'file:///' + item.cad_link.replace(/\\/g, '/');
-                    spec1Cell = `<a href="${fileUrl}" target="_blank" style="color: #0000FF; text-decoration: underline;" title="${item.cad_link}">${item.spec1}</a>`;
+                    spec1Cell = `<a href="/api/open-cad/${item.detail_id}" target="_blank" style="color: #0000FF; text-decoration: underline;" title="${item.spec1}">${item.spec1}</a>`;
                 }
 
                 // 加工用ブランクの場合、手配区分にバッジ表示
