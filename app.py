@@ -1565,6 +1565,11 @@ def _setup_print_settings(ws, row_idx, order, unit_display, customer, memo):
 # 🔥 更新対象のExcelファイル一覧
 EXCEL_FILES_TO_REFRESH = [
     {
+        'path': r"\\SERVER3\Share-data\Document\仕入れ\002_手配リスト\手配発注_ALL.xlsx",
+        'name': '手配発注_ALL',
+        'sheet': '手配リスト_ALL'
+    },
+    {
         'path': r"\\SERVER3\Share-data\Document\仕入れ\002_手配リスト\DV_仕入.xlsx",
         'name': 'DV_仕入',
         'sheet': '仕入_価格確認用'
@@ -1590,10 +1595,11 @@ def refresh_single_excel(excel_path, file_name):
         excel.AskToUpdateLinks = False
         excel.EnableEvents = False
 
-        # ファイルを開く
+        # ファイルを開く（手配発注_ALLは外部リンク更新が必要）
+        update_links = 3 if '手配発注_ALL' in file_name else 0
         wb = excel.Workbooks.Open(
             Filename=excel_path,
-            UpdateLinks=0,
+            UpdateLinks=update_links,
             ReadOnly=False,
             Notify=False
         )
@@ -1975,9 +1981,10 @@ def refresh_excel_endpoint():
             }), 500
 
         if result['success']:
-            # キャッシュをクリア
-            global cached_file_info, last_refresh_time
+            # キャッシュをクリア（手配発注_ALLのキャッシュも含む）
+            global cached_file_info, last_refresh_time, order_all_cache_time
             last_refresh_time = datetime.now()
+            order_all_cache_time = None  # 手配発注_ALLキャッシュを無効化
 
             # ファイル情報を取得
             file_info = check_network_file_access()
