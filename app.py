@@ -5110,7 +5110,17 @@ if __name__ == '__main__':
 
     # 設定を取得
     config_obj = get_config()
-    
+
+    # 🔥 起動時に発注_ALLキャッシュをバックグラウンドでプリロード
+    def _preload_cache():
+        try:
+            with app.app_context():
+                load_order_all_cache()
+                print("✅ 発注_ALLキャッシュのプリロード完了")
+        except Exception as e:
+            print(f"⚠️ プリロード失敗（初回検索時に再試行します）: {e}")
+    Thread(target=_preload_cache, daemon=True).start()
+
     # SSL/TLSコンテキストを取得
     ssl_context = None
     if hasattr(config_obj, 'USE_HTTPS') and config_obj.USE_HTTPS:
