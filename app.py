@@ -2477,10 +2477,33 @@ def get_delivery_schedule():
                 next_steps = []
                 is_blank = (str(detail.order_type_code or '').strip() == '13' or
                            '加工用ブランク' in str(detail.order_type or ''))
-                if is_blank and detail.parent_id:
+                if is_blank:
                     from utils.mekki_utils import MekkiUtils
-                    # ブランクの親（追加工）を取得 → 追加工の仕入先が次の加工先
-                    parent = OrderDetail.query.get(detail.parent_id)
+                    parent = None
+
+                    # 方法1: parent_idで親（追加工）を取得
+                    if detail.parent_id:
+                        parent = OrderDetail.query.get(detail.parent_id)
+
+                    # 方法2: parent_idがない場合、同じ注文内で行No・階層ルールでマッチング
+                    if not parent:
+                        blank_row_no = int(detail.row_number or 0) if detail.row_number else 0
+                        blank_hierarchy = detail.hierarchy or 0
+                        for d in order.details:
+                            if d.id == detail.id:
+                                continue
+                            d_code = str(d.order_type_code or '').strip()
+                            if d_code != '11' and '追加工' not in str(d.order_type or ''):
+                                continue
+                            d_row_no = int(d.row_number or 0) if d.row_number else 0
+                            d_hierarchy = d.hierarchy or 0
+                            # 追加工の行No < ブランクの行No <= 追加工の行No+300, 階層差=+1
+                            if (d_row_no < blank_row_no and
+                                blank_row_no <= d_row_no + 300 and
+                                blank_hierarchy == d_hierarchy + 1):
+                                parent = d
+                                break
+
                     if parent:
                         step = {
                             'supplier': parent.supplier or '',
@@ -2533,13 +2556,27 @@ def get_delivery_schedule():
                 'items': items
             })
 
+        # 集計情報
+        all_items = [item for d in result for item in d['items']]
+        unique_seibans = sorted(set(item['seiban'] for item in all_items))
+        unique_units = sorted(set(item['unit'] for item in all_items if item['unit']))
+        unique_suppliers = sorted(set(item['supplier'] for item in all_items if item['supplier']))
+
         return jsonify({
             'success': True,
             'start_date': today.isoformat(),
             'today': date.today().isoformat(),
             'week_end': week_end.isoformat(),
             'days': result,
-            'total_items': sum(len(d['items']) for d in result)
+            'total_items': len(all_items),
+            'summary': {
+                'seibans': unique_seibans,
+                'seiban_count': len(unique_seibans),
+                'units': unique_units,
+                'unit_count': len(unique_units),
+                'suppliers': unique_suppliers,
+                'supplier_count': len(unique_suppliers)
+            }
         })
 
     except Exception as e:

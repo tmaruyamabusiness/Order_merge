@@ -109,16 +109,32 @@ function renderDeliverySchedule(data) {
     const todayData = data.days.find(d => d.is_today);
     const todayCount = todayData ? todayData.total : 0;
     const todayReceived = todayData ? todayData.received : 0;
+    const summary = data.summary || {};
     html += `<div style="display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">
-        <div style="flex: 1; min-width: 200px; background: ${todayCount > 0 ? '#fff3cd' : '#d4edda'}; padding: 12px 18px; border-radius: 8px; border-left: 4px solid ${todayCount > 0 ? '#ffc107' : '#28a745'};">
+        <div style="flex: 1; min-width: 150px; background: ${todayCount > 0 ? '#fff3cd' : '#d4edda'}; padding: 12px 18px; border-radius: 8px; border-left: 4px solid ${todayCount > 0 ? '#ffc107' : '#28a745'};">
             <div style="font-size: 0.85em; color: #666;">今日の納品</div>
             <div style="font-size: 1.8em; font-weight: bold; color: ${todayCount > 0 ? '#856404' : '#155724'};">${todayCount}件</div>
             <div style="font-size: 0.8em; color: #888;">受入済: ${todayReceived}件</div>
         </div>
-        <div style="flex: 1; min-width: 200px; background: #e8f4ff; padding: 12px 18px; border-radius: 8px; border-left: 4px solid #007bff;">
+        <div style="flex: 1; min-width: 150px; background: #e8f4ff; padding: 12px 18px; border-radius: 8px; border-left: 4px solid #007bff;">
             <div style="font-size: 0.85em; color: #666;">期間合計</div>
             <div style="font-size: 1.8em; font-weight: bold; color: #004085;">${data.total_items}件</div>
-            <div style="font-size: 0.8em; color: #888;">${data.days.length}日間に分散</div>
+            <div style="font-size: 0.8em; color: #888;">${data.days.length}日間</div>
+        </div>
+        <div style="flex: 1; min-width: 150px; background: #f8f9fa; padding: 12px 18px; border-radius: 8px; border-left: 4px solid #6c757d;">
+            <div style="font-size: 0.85em; color: #666;">製番</div>
+            <div style="font-size: 1.2em; font-weight: bold; color: #333;">${summary.seiban_count || 0}件</div>
+            <div style="font-size: 0.75em; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${(summary.seibans || []).join(', ')}">${(summary.seibans || []).join(', ')}</div>
+        </div>
+        <div style="flex: 1; min-width: 150px; background: #f8f9fa; padding: 12px 18px; border-radius: 8px; border-left: 4px solid #6c757d;">
+            <div style="font-size: 0.85em; color: #666;">ユニット</div>
+            <div style="font-size: 1.2em; font-weight: bold; color: #333;">${summary.unit_count || 0}種</div>
+            <div style="font-size: 0.75em; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${(summary.units || []).join(', ')}">${(summary.units || []).join(', ')}</div>
+        </div>
+        <div style="flex: 1; min-width: 150px; background: #f8f9fa; padding: 12px 18px; border-radius: 8px; border-left: 4px solid #6c757d;">
+            <div style="font-size: 0.85em; color: #666;">仕入先</div>
+            <div style="font-size: 1.2em; font-weight: bold; color: #333;">${summary.supplier_count || 0}社</div>
+            <div style="font-size: 0.75em; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${(summary.suppliers || []).join(', ')}">${(summary.suppliers || []).join(', ')}</div>
         </div>
     </div>`;
 
