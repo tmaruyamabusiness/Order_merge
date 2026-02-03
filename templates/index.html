@@ -345,13 +345,15 @@
                             </div>
                             <!-- Html5Qrcode用のコンテナ -->
                             <div id="qr-reader" style="width: 100%; max-width: 400px; margin: 0 auto;"></div>
-                            <div id="qrResult" style="margin-top: 15px; font-size: 1.1em; color: #28a745; min-height: 30px;"></div>
-                            <p style="margin-top: 10px; color: #6c757d; font-size: 0.9em;">
-                                📦 バーコード・QRコードを枠内に収めてください<br>
+                            <div id="qrResult" style="margin-top: 10px; font-size: 1em; min-height: 30px;"></div>
+                            <!-- スキャンログ（連続スキャン結果） -->
+                            <div id="scanLog" style="margin-top: 8px; max-height: 150px; overflow-y: auto; text-align: left; background: #f8f9fa; border-radius: 6px;"></div>
+                            <p style="margin-top: 8px; color: #6c757d; font-size: 0.85em;">
+                                連続スキャン対応 - 読み取るだけで自動受入<br>
                                 <small>QRが近接している場合は「ピンポイント」に切替</small>
                             </p>
-                            <button class="btn btn-danger" onclick="stopQRScanner()" style="margin-top: 15px;">
-                                キャンセル
+                            <button class="btn btn-danger" onclick="stopQRScanner()" style="margin-top: 10px;">
+                                スキャン終了
                             </button>
                         </div>
                     </div>
