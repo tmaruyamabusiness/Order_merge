@@ -112,7 +112,13 @@
                 </div>
                                 
                 <div class="form-group">
-                    <input type="text" id="searchInput" placeholder="製番・ユニット名・客先名で検索..." onkeyup="filterOrders()">
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                        <input type="text" id="searchInput" placeholder="製番・ユニット名・客先名・ステータスで検索..." onkeyup="filterOrders()" style="flex:1; min-width:200px;">
+                        <div class="view-toggle-bar" style="margin-bottom:0;">
+                            <button class="btn btn-sm active" id="btnCardView" onclick="setViewMode('card')" title="カード表示">&#9638; カード</button>
+                            <button class="btn btn-sm" id="btnTableView" onclick="setViewMode('table')" title="テーブル表示">&#9776; テーブル</button>
+                        </div>
+                    </div>
                     <button class="btn btn-danger" id="deleteMultipleBtn" style="margin-top: 10px;">選択した製番を一括削除</button>
                 </div>
                 <div id="orderGrid" class="order-grid"></div>
@@ -2016,19 +2022,37 @@
                         </div>
                         <div class="unit-list" id="units-${seiban}" style="display: none;">
                         </div>
+                        <table class="unit-table" id="table-${seiban}" style="display:none;">
+                            <thead>
+                                <tr>
+                                    <th>ユニット</th>
+                                    <th>ステータス</th>
+                                    <th>進捗</th>
+                                    <th>場所</th>
+                                    <th>備考</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
                     `;
-                    
+
                     orderGrid.appendChild(parentCard);
-                    
+
                     // 子要素（ユニットレベル）をユニットリストに追加
                     const unitList = parentCard.querySelector(`#units-${seiban}`);
+                    const tableBody = parentCard.querySelector(`#table-${seiban} tbody`);
                     group.units.forEach(order => {
+                        // -- Card view --
                         const unitCard = document.createElement('div');
                         unitCard.className = `unit-card status-${order.status}`;
+                        unitCard.setAttribute('data-unit', (order.unit || '').toLowerCase());
+                        unitCard.setAttribute('data-status', (order.status || '').toLowerCase());
+                        unitCard.setAttribute('data-order-id', order.id);
                         unitCard.onclick = () => showOrderDetails(order.id);
-                        
+
                         const isCompleted = order.status === '納品完了';
-                        
+
                         unitCard.innerHTML = `
                             <div class="unit-header">
                                 <span class="unit-name">ユニット：${order.unit || 'ユニット名無し'}</span>
@@ -2037,13 +2061,13 @@
                             <div class="unit-details">
                                 <p><strong>📍 場所:</strong> ${order.location}</p>
                                 <p><strong>📊 進捗:</strong> ${order.received_count}/${order.detail_count} 完了</p>
-                                ${order.has_internal_processing ? 
+                                ${order.has_internal_processing ?
                                     '<p><span class="internal-processing-warning" style="display: inline-block; margin-top: 5px;">⚠️ 追加工有</span></p>' : ''
                                 }
-                                ${order.created_at ? 
+                                ${order.created_at ?
                                     `<p><strong>📅 シート作成日:</strong> ${order.created_at}</p>` : ''
                                 }
-                                ${order.updated_at ? 
+                                ${order.updated_at ?
                                     `<p><strong>✒️ シート内容更新日:</strong> ${order.updated_at}</p>` : ''
                                 }
                             </div>
@@ -2052,14 +2076,39 @@
                             </div>
                             <div class="unit-actions" style="margin-top: 5px; padding-top: 15px; border-top: 1px solid #e9ecef;">
                                 <button class="btn btn-primary" onclick="event.stopPropagation(); exportOrder(${order.id})">📄 Excel出力</button>
-                                ${isCompleted ? 
-                                    `<button class="btn btn-success" onclick="event.stopPropagation(); archiveOrder(${order.id})">📦 アーカイブへ</button>` : 
+                                ${isCompleted ?
+                                    `<button class="btn btn-success" onclick="event.stopPropagation(); archiveOrder(${order.id})">📦 アーカイブへ</button>` :
                                     `<button class="btn btn-danger" onclick="event.stopPropagation(); deleteOrder(${order.id})">🗑️ 削除</button>`
                                 }
                             </div>
                         `;
-                        
+
                         unitList.appendChild(unitCard);
+
+                        // -- Table view row --
+                        const pct = order.detail_count > 0 ? (order.received_count/order.detail_count)*100 : 0;
+                        const tr = document.createElement('tr');
+                        tr.setAttribute('data-unit', (order.unit || '').toLowerCase());
+                        tr.setAttribute('data-status', (order.status || '').toLowerCase());
+                        tr.setAttribute('data-order-id', order.id);
+                        tr.onclick = () => showOrderDetails(order.id);
+                        tr.innerHTML = `
+                            <td><strong>${order.unit || 'ユニット名無し'}</strong></td>
+                            <td><span class="order-status status-${order.status}" style="font-size:0.85em;padding:2px 8px;">${order.status}</span></td>
+                            <td>${order.received_count}/${order.detail_count}
+                                <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+                            </td>
+                            <td>${order.location || '未定'}</td>
+                            <td>${order.has_internal_processing ? '⚠️追加工' : ''}</td>
+                            <td>
+                                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); exportOrder(${order.id})" style="font-size:0.8em;padding:2px 6px;">📄</button>
+                                ${isCompleted ?
+                                    `<button class="btn btn-success btn-sm" onclick="event.stopPropagation(); archiveOrder(${order.id})" style="font-size:0.8em;padding:2px 6px;">📦</button>` :
+                                    `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteOrder(${order.id})" style="font-size:0.8em;padding:2px 6px;">🗑️</button>`
+                                }
+                            </td>
+                        `;
+                        tableBody.appendChild(tr);
                     });
                 });
 
@@ -2232,53 +2281,142 @@
                     }
                 }
 
-                function toggleSeibanGroup(seiban) {
-                    const unitList = document.getElementById(`units-${seiban}`);
-                    const toggle = document.getElementById(`toggle-${seiban}`);
-                    
-                    if (unitList && toggle) {
-                        if (unitList.style.display === 'none') {
-                            unitList.style.display = 'block';
-                            toggle.textContent = '📂';
-                            unitList.style.animation = 'fadeIn 0.3s';
+                // --- View mode state ---
+                let currentViewMode = 'card'; // 'card' or 'table'
+
+                function setViewMode(mode) {
+                    currentViewMode = mode;
+                    document.getElementById('btnCardView').classList.toggle('active', mode === 'card');
+                    document.getElementById('btnTableView').classList.toggle('active', mode === 'table');
+
+                    // Switch all open groups
+                    document.querySelectorAll('.seiban-group').forEach(group => {
+                        const unitList = group.querySelector('.unit-list');
+                        const unitTable = group.querySelector('.unit-table');
+                        if (!unitList || !unitTable) return;
+
+                        // Check if expanded (either view is visible)
+                        const toggle = group.querySelector('.seiban-toggle');
+                        const isOpen = toggle && toggle.textContent === '📂';
+                        if (isOpen) {
+                            unitList.style.display = mode === 'card' ? 'block' : 'none';
+                            unitTable.style.display = mode === 'table' ? 'table' : 'none';
                         } else {
                             unitList.style.display = 'none';
-                            toggle.textContent = '📁';
+                            unitTable.style.display = 'none';
                         }
+                    });
+
+                    // Re-apply search filter
+                    filterOrders();
+                }
+
+                function toggleSeibanGroup(seiban) {
+                    const unitList = document.getElementById(`units-${seiban}`);
+                    const unitTable = document.getElementById(`table-${seiban}`);
+                    const toggle = document.getElementById(`toggle-${seiban}`);
+
+                    if (!unitList || !toggle) return;
+
+                    const isCard = currentViewMode === 'card';
+                    const activeEl = isCard ? unitList : unitTable;
+                    const inactiveEl = isCard ? unitTable : unitList;
+
+                    // Always hide the inactive view
+                    if (inactiveEl) inactiveEl.style.display = 'none';
+
+                    if (activeEl.style.display === 'none' || activeEl.style.display === '') {
+                        activeEl.style.display = isCard ? 'block' : 'table';
+                        toggle.textContent = '📂';
+                        activeEl.style.animation = 'fadeIn 0.3s';
+                    } else {
+                        activeEl.style.display = 'none';
+                        toggle.textContent = '📁';
                     }
                 }
 
                 function filterOrders() {
-                    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-
-                    // 製番グループ（親要素）を検索対象にする
+                    const searchTerm = document.getElementById('searchInput').value.toLowerCase().trim();
                     const seibanGroups = document.querySelectorAll('.seiban-group');
+                    const isCard = currentViewMode === 'card';
 
                     seibanGroups.forEach(group => {
-                        // 製番タイトル（製番＋客先名）と製品名を取得
                         const seibanTitle = group.querySelector('.seiban-title');
                         const productName = group.querySelector('.seiban-product-name');
+                        const toggle = group.querySelector('.seiban-toggle');
 
-                        let searchText = '';
-                        if (seibanTitle) {
-                            searchText += seibanTitle.textContent.toLowerCase();
-                        }
-                        if (productName) {
-                            searchText += ' ' + productName.textContent.toLowerCase();
+                        // Build header-level text
+                        let headerText = '';
+                        if (seibanTitle) headerText += seibanTitle.textContent.toLowerCase();
+                        if (productName) headerText += ' ' + productName.textContent.toLowerCase();
+
+                        // If no search term, show group collapsed, all units visible
+                        if (!searchTerm) {
+                            group.style.display = '';
+                            // Reset all unit cards & table rows visibility
+                            group.querySelectorAll('.unit-card').forEach(c => {
+                                c.style.display = '';
+                                c.classList.remove('search-highlight');
+                            });
+                            group.querySelectorAll('.unit-table tbody tr').forEach(r => {
+                                r.style.display = '';
+                                r.classList.remove('search-highlight');
+                            });
+                            return;
                         }
 
-                        // ユニット名・ステータスも検索対象に追加
+                        // Check header match (seiban, customer, product)
+                        const headerMatch = headerText.includes(searchTerm);
+
+                        // Check individual units
+                        let anyUnitMatch = false;
                         const unitCards = group.querySelectorAll('.unit-card');
-                        unitCards.forEach(card => {
-                            const unitName = card.querySelector('.unit-name');
-                            const status = card.querySelector('.order-status');
-                            if (unitName) searchText += ' ' + unitName.textContent.toLowerCase();
-                            if (status) searchText += ' ' + status.textContent.toLowerCase();
+                        const tableRows = group.querySelectorAll('.unit-table tbody tr');
+
+                        unitCards.forEach((card, i) => {
+                            const unit = card.getAttribute('data-unit') || '';
+                            const status = card.getAttribute('data-status') || '';
+                            const unitText = unit + ' ' + status;
+                            const matched = unitText.includes(searchTerm);
+
+                            if (matched) anyUnitMatch = true;
+
+                            // If header matches, show all; else show only matching units
+                            if (headerMatch) {
+                                card.style.display = '';
+                                card.classList.remove('search-highlight');
+                            } else {
+                                card.style.display = matched ? '' : 'none';
+                                card.classList.toggle('search-highlight', matched);
+                            }
+
+                            // Same logic for table row
+                            if (tableRows[i]) {
+                                if (headerMatch) {
+                                    tableRows[i].style.display = '';
+                                    tableRows[i].classList.remove('search-highlight');
+                                } else {
+                                    tableRows[i].style.display = matched ? '' : 'none';
+                                    tableRows[i].classList.toggle('search-highlight', matched);
+                                }
+                            }
                         });
 
-                        // 検索条件に一致するかチェック
-                        if (searchText.includes(searchTerm)) {
-                            group.style.display = 'block';
+                        if (headerMatch || anyUnitMatch) {
+                            group.style.display = '';
+                            // Auto-expand when searching by unit name
+                            if (anyUnitMatch && !headerMatch) {
+                                const unitList = group.querySelector('.unit-list');
+                                const unitTable = group.querySelector('.unit-table');
+                                if (isCard && unitList) {
+                                    unitList.style.display = 'block';
+                                    if (unitTable) unitTable.style.display = 'none';
+                                } else if (!isCard && unitTable) {
+                                    unitTable.style.display = 'table';
+                                    if (unitList) unitList.style.display = 'none';
+                                }
+                                if (toggle) toggle.textContent = '📂';
+                            }
                         } else {
                             group.style.display = 'none';
                         }

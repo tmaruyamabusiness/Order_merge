@@ -303,6 +303,61 @@
             align-items: center;
             margin-bottom: 8px;
         }
+
+        /* ---- Search highlight ---- */
+        .unit-card.search-highlight {
+            border-left: 4px solid #ff6b00;
+            background: #fff8e1;
+        }
+
+        /* ---- View toggle ---- */
+        .view-toggle-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .view-toggle-bar .btn.active {
+            background: #0d6efd;
+            color: #fff;
+        }
+
+        /* ---- Table view ---- */
+        .unit-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+            display: none;
+        }
+        .unit-table th, .unit-table td {
+            padding: 6px 10px;
+            border-bottom: 1px solid #e9ecef;
+            white-space: nowrap;
+            text-align: left;
+        }
+        .unit-table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        .unit-table tr {
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .unit-table tbody tr:hover {
+            background: #e9f5ff;
+        }
+        .unit-table tr.search-highlight {
+            background: #fff8e1;
+        }
+        .unit-table .progress-bar {
+            width: 80px;
+            height: 6px;
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 6px;
+        }
         
         .progress-info {
             display: flex;
