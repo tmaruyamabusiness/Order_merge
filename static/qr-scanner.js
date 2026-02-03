@@ -379,17 +379,29 @@ function processScannedCode(data) {
         if (purchaseOrderInput) purchaseOrderInput.value = data;
         stopQRScanner();
         showBarcodeReceivePopup(data);
-    } else if (data.toUpperCase().startsWith('MHT')) {
-        // 製番の場合
-        stopQRScanner();
-        alert(`製番 ${data} を検出しました。\n製番での検索機能を実装予定です。`);
     } else {
-        // その他のフォーマット
-        if (purchaseOrderInput) purchaseOrderInput.value = data;
-        stopQRScanner();
+        // 🔥 テキスト末尾から8桁の数字列を抽出（例: "MHT0620エキシボリ00088066" → "00088066"）
+        // 末尾の連続数字が8桁以上ある場合、最後の8桁を発注番号とする
+        const eightDigitMatch = data.match(/(\d{8,})$/);
+        if (eightDigitMatch) {
+            const numericPart = eightDigitMatch[1].slice(-8);
+            const orderNumber = String(parseInt(numericPart, 10));
+            console.log(`QRテキストから発注番号抽出: ${data} → ${orderNumber}`);
+            if (purchaseOrderInput) purchaseOrderInput.value = orderNumber;
+            stopQRScanner();
+            showBarcodeReceivePopup(orderNumber);
+        } else if (data.toUpperCase().startsWith('MHT')) {
+            // 製番のみで発注番号が含まれない場合
+            stopQRScanner();
+            alert(`製番 ${data} を検出しました。\n発注番号が含まれていません。`);
+        } else {
+            // その他のフォーマット
+            if (purchaseOrderInput) purchaseOrderInput.value = data;
+            stopQRScanner();
 
-        if (confirm(`読み取った値: ${data}\n\nこれを発注番号として検索しますか？`)) {
-            showBarcodeReceivePopup(data);
+            if (confirm(`読み取った値: ${data}\n\nこれを発注番号として検索しますか？`)) {
+                showBarcodeReceivePopup(data);
+            }
         }
     }
 }
