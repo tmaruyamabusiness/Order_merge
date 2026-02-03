@@ -337,11 +337,18 @@
                             <button onclick="stopQRScanner()" style="background: none; border: none; color: white; font-size: 1.5em; cursor: pointer;">×</button>
                         </div>
                         <div class="modal-body" style="text-align: center; padding: 15px;">
+                            <!-- スキャン範囲切替 -->
+                            <div style="display:flex; justify-content:center; gap:6px; margin-bottom:10px;">
+                                <button class="btn btn-sm" id="scanModeWide" onclick="setScanMode('wide')" style="background:#0d6efd;color:#fff;padding:4px 10px;font-size:0.85em;">広域</button>
+                                <button class="btn btn-sm" id="scanModeNarrow" onclick="setScanMode('narrow')" style="padding:4px 10px;font-size:0.85em;">ピンポイント</button>
+                                <button class="btn btn-sm" id="scanModeBarcode" onclick="setScanMode('barcode')" style="padding:4px 10px;font-size:0.85em;">バーコード</button>
+                            </div>
                             <!-- Html5Qrcode用のコンテナ -->
                             <div id="qr-reader" style="width: 100%; max-width: 400px; margin: 0 auto;"></div>
                             <div id="qrResult" style="margin-top: 15px; font-size: 1.1em; color: #28a745; min-height: 30px;"></div>
                             <p style="margin-top: 10px; color: #6c757d; font-size: 0.9em;">
-                                📦 バーコード・QRコードを枠内に収めてください
+                                📦 バーコード・QRコードを枠内に収めてください<br>
+                                <small>QRが近接している場合は「ピンポイント」に切替</small>
                             </p>
                             <button class="btn btn-danger" onclick="stopQRScanner()" style="margin-top: 15px;">
                                 キャンセル

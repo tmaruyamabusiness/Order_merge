@@ -25,6 +25,9 @@ const CONFIG = {
     VIBRATION_PATTERN: [100, 50, 100]  // バイブレーションパターン
 };
 
+// スキャンモード: 'wide'(デフォルト), 'narrow'(ピンポイント), 'barcode'(横長)
+let currentScanMode = 'wide';
+
 // ========================================
 // QRスキャナーを開始
 // ========================================
@@ -95,21 +98,64 @@ function initializeScanner() {
 // ========================================
 // 新しいスキャナーを作成
 // ========================================
+// ========================================
+// スキャンモード切替（カメラ再起動）
+// ========================================
+function setScanMode(mode) {
+    currentScanMode = mode;
+
+    // ボタンのアクティブ状態を更新
+    ['Wide', 'Narrow', 'Barcode'].forEach(m => {
+        const btn = document.getElementById('scanMode' + m);
+        if (btn) {
+            if (m.toLowerCase() === mode) {
+                btn.style.background = '#0d6efd';
+                btn.style.color = '#fff';
+            } else {
+                btn.style.background = '';
+                btn.style.color = '';
+            }
+        }
+    });
+
+    // スキャナーを再起動して新しい枠サイズを適用
+    if (html5QrCode && html5QrCode.isScanning) {
+        html5QrCode.stop().then(() => {
+            html5QrCode.clear();
+            createNewScanner();
+        }).catch(() => {
+            createNewScanner();
+        });
+    }
+}
+
 function createNewScanner() {
     html5QrCode = new Html5Qrcode("qr-reader");
 
-    // バーコード・QRコード対応の設定
+    // バーコード・QRコード対応の設定（モードに応じて枠サイズ変更）
     const config = {
         fps: 15,
         qrbox: function(viewfinderWidth, viewfinderHeight) {
-            let minEdgePercentage = 0.7;
-            let minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight);
-            let qrboxSize = Math.floor(minEdgeSize * minEdgePercentage);
-            qrboxSize = Math.max(200, Math.min(350, qrboxSize));
-            return {
-                width: qrboxSize,
-                height: qrboxSize
-            };
+            let w, h;
+            if (currentScanMode === 'narrow') {
+                // ピンポイント: 小さい正方形（近接QR用）
+                let size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.35);
+                size = Math.max(100, Math.min(180, size));
+                w = size;
+                h = size;
+            } else if (currentScanMode === 'barcode') {
+                // バーコード: 横長の矩形
+                w = Math.floor(viewfinderWidth * 0.8);
+                w = Math.max(250, Math.min(400, w));
+                h = Math.floor(w * 0.3);
+            } else {
+                // 広域: デフォルト
+                let size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.7);
+                size = Math.max(200, Math.min(350, size));
+                w = size;
+                h = size;
+            }
+            return { width: w, height: h };
         },
         aspectRatio: 1.0,
         videoConstraints: {
