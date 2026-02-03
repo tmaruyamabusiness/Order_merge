@@ -112,7 +112,7 @@
                 </div>
                                 
                 <div class="form-group">
-                    <input type="text" id="searchInput" placeholder="製番で検索..." onkeyup="filterOrders()">
+                    <input type="text" id="searchInput" placeholder="製番・ユニット名・客先名で検索..." onkeyup="filterOrders()">
                     <button class="btn btn-danger" id="deleteMultipleBtn" style="margin-top: 10px;">選択した製番を一括削除</button>
                 </div>
                 <div id="orderGrid" class="order-grid"></div>
@@ -2250,15 +2250,15 @@
 
                 function filterOrders() {
                     const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-                    
+
                     // 製番グループ（親要素）を検索対象にする
                     const seibanGroups = document.querySelectorAll('.seiban-group');
-                    
+
                     seibanGroups.forEach(group => {
-                        // 製番タイトルと製品名を取得
+                        // 製番タイトル（製番＋客先名）と製品名を取得
                         const seibanTitle = group.querySelector('.seiban-title');
                         const productName = group.querySelector('.seiban-product-name');
-                        
+
                         let searchText = '';
                         if (seibanTitle) {
                             searchText += seibanTitle.textContent.toLowerCase();
@@ -2266,7 +2266,16 @@
                         if (productName) {
                             searchText += ' ' + productName.textContent.toLowerCase();
                         }
-                        
+
+                        // ユニット名・ステータスも検索対象に追加
+                        const unitCards = group.querySelectorAll('.unit-card');
+                        unitCards.forEach(card => {
+                            const unitName = card.querySelector('.unit-name');
+                            const status = card.querySelector('.order-status');
+                            if (unitName) searchText += ' ' + unitName.textContent.toLowerCase();
+                            if (status) searchText += ' ' + status.textContent.toLowerCase();
+                        });
+
                         // 検索条件に一致するかチェック
                         if (searchText.includes(searchTerm)) {
                             group.style.display = 'block';
