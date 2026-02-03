@@ -910,6 +910,55 @@ def update_order_excel(order_id):
         import traceback
         traceback.print_exc()
         return False, str(e)
+
+def update_unit_excel_only(order_id):
+    """受入処理用の軽量Excel更新 - 対象ユニットのシートのみ差し替え（ガントチャート・他ユニットはスキップ）"""
+    import shutil
+    try:
+        order = db.session.get(Order, order_id)
+        if not order:
+            return False, "注文が見つかりません"
+
+        data_filepath = get_order_excel_data_path(order.seiban, order.product_name, order.customer_abbr)
+        filepath = get_order_excel_path(order.seiban, order.product_name, order.customer_abbr)
+
+        unit_display = order.unit if order.unit else 'ユニット名無し'
+        sheet_name = f"{order.seiban}_{unit_display}"
+        sheet_name = re.sub(r'[\\\/\?\*\[\]:]', '', sheet_name)[:31]
+
+        # 既存ワークブックを開く（なければフル再生成にフォールバック）
+        if Path(data_filepath).exists():
+            try:
+                wb = load_workbook(data_filepath)
+            except Exception:
+                return update_order_excel(order_id)
+        else:
+            return update_order_excel(order_id)
+
+        # 対象シートだけ削除して再作成
+        if sheet_name in wb.sheetnames:
+            del wb[sheet_name]
+
+        ws = wb.create_sheet(sheet_name)
+        create_order_sheet(ws, order, sheet_name)
+
+        # 保存
+        wb.save(data_filepath)
+        wb.close()
+        print(f"✅ ユニットシート更新: {sheet_name}")
+
+        # メインファイルにコピー
+        try:
+            shutil.copy2(data_filepath, filepath)
+        except PermissionError:
+            pass  # dataフォルダには保存済み
+
+        return True, None
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return False, str(e)
     
 def save_to_database(df, seiban_prefix):
     """Save processed data to database"""
@@ -3801,11 +3850,15 @@ def update_order(order_id):
         order.updated_at = datetime.now(timezone.utc)
         db.session.commit()
 
-        # 🔥 Excelファイルも更新（保管場所・備考の変更を反映）
-        try:
-            update_order_excel(order_id)
-        except Exception as excel_error:
-            print(f"⚠️ Excel更新エラー（DB保存は成功）: {excel_error}")
+        # 🔥 Excelファイルも更新（対象ユニットのみ・非同期）
+        _oid = order_id
+        def _bg_update():
+            try:
+                with app.app_context():
+                    update_unit_excel_only(_oid)
+            except Exception as excel_error:
+                print(f"⚠️ Excel更新エラー（DB保存は成功）: {excel_error}")
+        Thread(target=_bg_update, daemon=True).start()
 
         # 🔥 納品完了になった場合の処理
         response_data = {
@@ -3893,11 +3946,15 @@ def toggle_receive_detail(detail_id):
         
         db.session.commit()
 
-        # Excelファイルを自動更新（dataフォルダに元データ保存→メインファイルにコピー）
-        try:
-            update_order_excel(order.id)
-        except Exception as excel_error:
-            print(f"⚠️ Excel更新エラー（DB保存は成功）: {excel_error}")
+        # Excelファイルを非同期で軽量更新（対象ユニットのシートのみ）
+        _order_id = order.id
+        def _bg_excel_update():
+            try:
+                with app.app_context():
+                    update_unit_excel_only(_order_id)
+            except Exception as excel_error:
+                print(f"⚠️ Excel更新エラー（DB保存は成功）: {excel_error}")
+        Thread(target=_bg_excel_update, daemon=True).start()
 
         # メッセージ作成（詳細情報を含む）
         if detail.is_received:
