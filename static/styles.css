@@ -78,6 +78,11 @@
             to { opacity: 1; transform: translateY(0); }
         }
 
+        @keyframes toastFadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
         .upload-section {
             background: #f8f9fa;
             border-radius: 10px;
