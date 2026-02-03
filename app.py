@@ -1262,7 +1262,7 @@ def create_order_sheet(ws, order, sheet_name=None):
     ws['A2'].alignment = Alignment(horizontal='left', vertical='center')
 
     # A3: 注意書き（赤字）
-    ws['A3'] = '※ピンク塗は受入済 製番外の持ち出しは必ず記録を残すこと データは保存先にて随時更新'
+    ws['A3'] = '※赤字は追加工品 製番外の持ち出しは必ず記録を残すこと データは保存先にて随時更新'
     ws['A3'].font = Font(size=9, bold=True, color=Constants.COLOR_RED)
     ws['A3'].alignment = Alignment(horizontal='left', vertical='center')
 
