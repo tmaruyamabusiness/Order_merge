@@ -4,6 +4,13 @@
 
 let deliveryScheduleData = null;
 
+// 現在のフィルター状態
+let dsFilters = {
+    seiban: '',
+    unit: '',
+    supplier: ''
+};
+
 // 納品予定を読み込み
 async function loadDeliverySchedule() {
     const container = document.getElementById('deliveryScheduleContent');
@@ -42,7 +49,7 @@ function resetDeliveryStartDate() {
     loadDeliverySchedule();
 }
 
-// 納品予定の受入トグル
+// 納品予定の受入トグル（行単位でインライン更新）
 async function toggleDeliveryReceive(detailId, btnElement) {
     if (!btnElement) return;
     const origText = btnElement.textContent;
@@ -57,8 +64,43 @@ async function toggleDeliveryReceive(detailId, btnElement) {
         const result = await response.json();
 
         if (result.success) {
-            // データ更新して再描画
-            loadDeliverySchedule();
+            // 行をインライン更新（全体リロードしない）
+            const row = btnElement.closest('tr');
+            if (!row) { loadDeliverySchedule(); return; }
+
+            const isNowReceived = result.is_received;
+            const nextRow = row.nextElementSibling;
+
+            // キャッシュデータも更新
+            if (deliveryScheduleData) {
+                deliveryScheduleData.days.forEach(day => {
+                    day.items.forEach(item => {
+                        if (item.detail_id === detailId) {
+                            item.is_received = isNowReceived;
+                        }
+                    });
+                });
+            }
+
+            // 行の背景色を更新
+            row.style.background = isNowReceived ? '#d4edda' : '';
+
+            // ボタンを切替
+            if (isNowReceived) {
+                btnElement.style.background = '#fff';
+                btnElement.style.color = '#dc3545';
+                btnElement.style.border = '1px solid #dc3545';
+                btnElement.textContent = '取消';
+            } else {
+                btnElement.style.background = '#28a745';
+                btnElement.style.color = '#fff';
+                btnElement.style.border = '1px solid #28a745';
+                btnElement.textContent = '受入';
+            }
+            btnElement.disabled = false;
+
+            // 日ヘッダーの受入カウントを更新
+            updateDayHeaderCounts();
         } else {
             alert('エラー: ' + (result.error || '受入処理に失敗'));
             btnElement.disabled = false;
@@ -69,6 +111,19 @@ async function toggleDeliveryReceive(detailId, btnElement) {
         btnElement.disabled = false;
         btnElement.textContent = origText;
     }
+}
+
+// 日ヘッダーの受入カウントを更新
+function updateDayHeaderCounts() {
+    if (!deliveryScheduleData) return;
+    deliveryScheduleData.days.forEach(day => {
+        const received = day.items.filter(i => i.is_received).length;
+        day.received = received;
+        const countEl = document.getElementById('deliveryDayCount_' + day.date);
+        if (countEl) {
+            countEl.textContent = `${received}/${day.total} 受入済`;
+        }
+    });
 }
 
 // NEXT処理ステップを生成
@@ -85,12 +140,160 @@ function buildNextStepsHtml(item) {
     });
     steps += ' → 仕分 → 完了';
 
-    return `<tr style="background: #f0f8ff; border-bottom: 1px solid #eee;">
+    return `<tr class="ds-next-row" style="background: #f0f8ff; border-bottom: 1px solid #eee;">
         <td colspan="9" style="padding: 3px 10px 3px 30px; font-size: 0.82em; color: #555;">
             <span style="background: #17a2b8; color: white; padding: 1px 6px; border-radius: 3px; font-size: 0.85em; margin-right: 5px;">NEXT</span>
             ${steps}
         </td>
     </tr>`;
+}
+
+// フィルター変更時
+function applyDeliveryFilters() {
+    dsFilters.seiban = (document.getElementById('dsFilterSeiban')?.value || '').toLowerCase();
+    dsFilters.unit = (document.getElementById('dsFilterUnit')?.value || '').toLowerCase();
+    dsFilters.supplier = (document.getElementById('dsFilterSupplier')?.value || '').toLowerCase();
+    filterDeliveryRows();
+}
+
+// フィルタークリア
+function clearDeliveryFilters() {
+    ['dsFilterSeiban', 'dsFilterUnit', 'dsFilterSupplier'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    dsFilters = { seiban: '', unit: '', supplier: '' };
+    filterDeliveryRows();
+}
+
+// 行レベルのフィルタリング
+function filterDeliveryRows() {
+    const rows = document.querySelectorAll('tr.ds-item-row');
+    rows.forEach(row => {
+        const seiban = (row.dataset.seiban || '').toLowerCase();
+        const unit = (row.dataset.unit || '').toLowerCase();
+        const supplier = (row.dataset.supplier || '').toLowerCase();
+
+        const match =
+            (!dsFilters.seiban || seiban.includes(dsFilters.seiban)) &&
+            (!dsFilters.unit || unit.includes(dsFilters.unit)) &&
+            (!dsFilters.supplier || supplier.includes(dsFilters.supplier));
+
+        row.style.display = match ? '' : 'none';
+
+        // NEXT行も連動
+        const nextRow = row.nextElementSibling;
+        if (nextRow && nextRow.classList.contains('ds-next-row')) {
+            nextRow.style.display = match ? '' : 'none';
+        }
+    });
+}
+
+// 表示中の未受入アイテムを一括受入
+async function batchReceiveFiltered() {
+    // 表示中で未受入の行を収集
+    const rows = document.querySelectorAll('tr.ds-item-row');
+    const targets = [];
+    rows.forEach(row => {
+        if (row.style.display === 'none') return;
+        const btn = row.querySelector('button');
+        if (!btn) return;
+        // 受入ボタン（緑）のみ対象、取消ボタン（白/赤）はスキップ
+        if (btn.textContent.trim() === '受入') {
+            const detailId = parseInt(row.dataset.detailId);
+            if (detailId) targets.push({ detailId, btn, row });
+        }
+    });
+
+    if (targets.length === 0) {
+        alert('受入対象のアイテムがありません');
+        return;
+    }
+
+    const hasFilter = dsFilters.seiban || dsFilters.unit || dsFilters.supplier;
+    const msg = hasFilter
+        ? `フィルター中の未受入 ${targets.length}件 を一括受入しますか？`
+        : `表示中の未受入 ${targets.length}件 を一括受入しますか？\n（フィルターで絞り込むことを推奨します）`;
+
+    if (!confirm(msg)) return;
+
+    const batchBtn = document.getElementById('dsBatchReceiveBtn');
+    if (batchBtn) {
+        batchBtn.disabled = true;
+        batchBtn.textContent = `処理中... 0/${targets.length}`;
+    }
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (let i = 0; i < targets.length; i++) {
+        const { detailId, btn, row } = targets[i];
+        try {
+            const response = await fetch(`/api/detail/${detailId}/toggle-receive`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const result = await response.json();
+
+            if (result.success && result.is_received) {
+                // インライン更新
+                row.style.background = '#d4edda';
+                btn.style.background = '#fff';
+                btn.style.color = '#dc3545';
+                btn.style.border = '1px solid #dc3545';
+                btn.textContent = '取消';
+
+                // キャッシュ更新
+                if (deliveryScheduleData) {
+                    deliveryScheduleData.days.forEach(day => {
+                        day.items.forEach(item => {
+                            if (item.detail_id === detailId) {
+                                item.is_received = true;
+                            }
+                        });
+                    });
+                }
+                successCount++;
+            } else {
+                errorCount++;
+            }
+        } catch (e) {
+            errorCount++;
+        }
+
+        if (batchBtn) {
+            batchBtn.textContent = `処理中... ${i + 1}/${targets.length}`;
+        }
+    }
+
+    // 日ヘッダーカウント更新
+    updateDayHeaderCounts();
+
+    if (batchBtn) {
+        batchBtn.disabled = false;
+        batchBtn.textContent = '一括受入';
+    }
+
+    if (errorCount > 0) {
+        alert(`完了: ${successCount}件 受入成功 / ${errorCount}件 エラー`);
+    }
+}
+
+// フィルター用セレクトボックスの選択肢を構築
+function buildFilterOptions(data) {
+    const seibans = new Set();
+    const units = new Set();
+    const suppliers = new Set();
+
+    data.days.forEach(day => {
+        day.items.forEach(item => {
+            if (item.seiban) seibans.add(item.seiban);
+            if (item.unit) units.add(item.unit);
+            if (item.supplier) suppliers.add(item.supplier);
+        });
+    });
+
+    return { seibans: [...seibans].sort(), units: [...units].sort(), suppliers: [...suppliers].sort() };
 }
 
 // 納品予定を描画
@@ -103,6 +306,7 @@ function renderDeliverySchedule(data) {
         return;
     }
 
+    const opts = buildFilterOptions(data);
     let html = '';
 
     // サマリーバー
@@ -138,6 +342,27 @@ function renderDeliverySchedule(data) {
         </div>
     </div>`;
 
+    // フィルターバー
+    html += `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; padding:8px 12px; background:#f8f9fa; border-radius:8px;">
+        <span style="font-weight:bold; font-size:0.9em;">絞り込み:</span>
+        <select id="dsFilterSeiban" onchange="applyDeliveryFilters()" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.88em;">
+            <option value="">全製番</option>
+            ${opts.seibans.map(s => `<option value="${s}">${s}</option>`).join('')}
+        </select>
+        <select id="dsFilterUnit" onchange="applyDeliveryFilters()" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.88em;">
+            <option value="">全ユニット</option>
+            ${opts.units.map(u => `<option value="${u}">${u}</option>`).join('')}
+        </select>
+        <select id="dsFilterSupplier" onchange="applyDeliveryFilters()" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.88em;">
+            <option value="">全仕入先</option>
+            ${opts.suppliers.map(s => `<option value="${s}">${s}</option>`).join('')}
+        </select>
+        <button onclick="clearDeliveryFilters()" style="padding:4px 10px; border:1px solid #ccc; border-radius:4px; background:#fff; cursor:pointer; font-size:0.88em;">クリア</button>
+        <div style="margin-left:auto;">
+            <button id="dsBatchReceiveBtn" onclick="batchReceiveFiltered()" style="padding:5px 14px; border:1px solid #28a745; border-radius:4px; background:#28a745; color:#fff; cursor:pointer; font-size:0.88em; font-weight:bold;">一括受入</button>
+        </div>
+    </div>`;
+
     // 日ごとのセクション
     data.days.forEach(day => {
         const bgColor = day.is_today ? '#fffbea' : day.is_weekend ? '#fff0f0' : '#ffffff';
@@ -149,7 +374,7 @@ function renderDeliverySchedule(data) {
         html += `<div style="padding: 10px 15px; background: ${day.is_today ? '#fff3cd' : '#f8f9fa'}; border-bottom: 1px solid ${borderColor}; display: flex; align-items: center; justify-content: space-between; cursor: pointer;" onclick="toggleDeliveryDay('${day.date}')">`;
         html += `<div><strong style="font-size: 1.1em;">${day.display_date}</strong>${todayBadge}${weekendBadge}</div>`;
         html += `<div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 0.9em; color: #666;">${day.received}/${day.total} 受入済</span>
+            <span id="deliveryDayCount_${day.date}" style="font-size: 0.9em; color: #666;">${day.received}/${day.total} 受入済</span>
             <span style="background: ${day.received === day.total ? '#28a745' : '#007bff'}; color: white; padding: 2px 10px; border-radius: 12px; font-weight: bold;">${day.total}件</span>
             <span id="deliveryDayArrow_${day.date}" style="transition: transform 0.2s;">&#9660;</span>
         </div>`;
@@ -199,7 +424,7 @@ function renderDeliverySchedule(data) {
                     ? `<span style="background: #17a2b8; color: white; padding: 1px 5px; border-radius: 3px; font-size: 0.9em;">${item.order_type}</span>`
                     : item.order_type;
 
-                html += `<tr style="${receivedStyle} border-bottom: 1px solid #eee;">
+                html += `<tr class="ds-item-row" data-detail-id="${item.detail_id}" data-seiban="${item.seiban}" data-unit="${item.unit}" data-supplier="${item.supplier}" style="${receivedStyle} border-bottom: 1px solid #eee;">
                     <td style="padding: 5px 10px; text-align: center;">${btn}</td>
                     <td style="padding: 5px 10px; white-space: nowrap;">${item.seiban}</td>
                     <td style="padding: 5px 10px; font-size: 0.9em;">${item.unit}</td>
@@ -216,7 +441,7 @@ function renderDeliverySchedule(data) {
                     if (item.next_steps && item.next_steps.length > 0) {
                         html += buildNextStepsHtml(item);
                     } else {
-                        html += `<tr style="background: #fff8e1; border-bottom: 1px solid #eee;">
+                        html += `<tr class="ds-next-row" style="background: #fff8e1; border-bottom: 1px solid #eee;">
                             <td colspan="9" style="padding: 3px 10px 3px 30px; font-size: 0.82em; color: #856404;">
                                 <span style="background: #ffc107; color: #333; padding: 1px 6px; border-radius: 3px; font-size: 0.85em; margin-right: 5px;">NEXT</span>
                                 → 追加工待ち → 仕分 → 完了
