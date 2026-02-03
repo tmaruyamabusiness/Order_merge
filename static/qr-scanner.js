@@ -349,15 +349,19 @@ function processScannedCode(data) {
     }
 
     // 🔥 誤読み取り防止: 数字+アルファベットの混在パターンを検出（無効なバーコード）
-    const invalidBarcodePattern = /^\d*[A-Za-z]+\d*[A-Za-z]*$/;
-    if (invalidBarcodePattern.test(data) && data.length >= 8) {
-        console.log(`無効なバーコード形式を検出: ${data}`);
-        showScannerStatus(`⚠️ 読み取りエラー: ${data}（再スキャンしてください）`, 'error');
-        playBeep(false);
-        // スキャナーを再開
-        isScannerPaused = false;
-        scanHistory.delete(data);  // 履歴から削除して再スキャン可能に
-        return;
+    // ただし8桁以上の連続数字を含む場合は発注番号として処理するため除外
+    const hasEightDigits = /\d{8}/.test(data);
+    if (!hasEightDigits) {
+        const invalidBarcodePattern = /^\d*[A-Za-z]+\d*[A-Za-z]*$/;
+        if (invalidBarcodePattern.test(data) && data.length >= 8) {
+            console.log(`無効なバーコード形式を検出: ${data}`);
+            showScannerStatus(`⚠️ 読み取りエラー: ${data}（再スキャンしてください）`, 'error');
+            playBeep(false);
+            // スキャナーを再開
+            isScannerPaused = false;
+            scanHistory.delete(data);  // 履歴から削除して再スキャン可能に
+            return;
+        }
     }
 
     // QRコードのフォーマットをチェック
@@ -380,11 +384,12 @@ function processScannedCode(data) {
         stopQRScanner();
         showBarcodeReceivePopup(data);
     } else {
-        // 🔥 テキスト末尾から8桁の数字列を抽出（例: "MHT0620エキシボリ00088066" → "00088066"）
-        // 末尾の連続数字が8桁以上ある場合、最後の8桁を発注番号とする
-        const eightDigitMatch = data.match(/(\d{8,})$/);
-        if (eightDigitMatch) {
-            const numericPart = eightDigitMatch[1].slice(-8);
+        // 🔥 テキスト内から8桁以上の連続数字を抽出（例: "MHT0620エキシボリ00088066" → "00088066"）
+        // 全マッチから最も長い（最後の）8桁以上の数字列を使う
+        const allDigitMatches = data.match(/\d{8,}/g);
+        if (allDigitMatches) {
+            const longestMatch = allDigitMatches[allDigitMatches.length - 1];
+            const numericPart = longestMatch.slice(-8);
             const orderNumber = String(parseInt(numericPart, 10));
             console.log(`QRテキストから発注番号抽出: ${data} → ${orderNumber}`);
             if (purchaseOrderInput) purchaseOrderInput.value = orderNumber;
