@@ -1,287 +1,310 @@
 """
 ガントチャート作成関数
-- Y軸左側にユニット名を表示
-- X軸下部に日数を表示し、チャート右側に日付対応表を配置
+- セルの塗りつぶしでバーを表現（ブラウザ版と同じ見た目）
+- Y軸左側にユニット名を明確表示
+- X軸上部に日付ヘッダー
+- 今日のラインを赤で強調
 """
 
 from openpyxl import Workbook
-from openpyxl.chart import BarChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 from datetime import datetime, timedelta
+
+
+# ユニットごとの色パレット（ブラウザ版と合わせる）
+UNIT_COLORS = [
+    "4472C4",  # 青
+    "ED7D31",  # オレンジ
+    "70AD47",  # 緑
+    "FFC000",  # 黄
+    "5B9BD5",  # 水色
+    "FF6384",  # ピンク
+    "A855F7",  # 紫
+    "44BBA4",  # ティール
+    "FF9F40",  # 薄オレンジ
+    "36A2EB",  # ライト青
+    "C45850",  # 赤茶
+    "8B5CF6",  # バイオレット
+    "059669",  # エメラルド
+    "DC2626",  # 赤
+    "7C3AED",  # インディゴ
+]
+
 
 def create_gantt_chart_sheet(wb, seiban, orders):
     """
-    ガントチャートシートを作成
-    
-    Parameters:
-    - wb: openpyxl Workbook オブジェクト
-    - seiban: 製番（例: MHT0614）
-    - orders: Order オブジェクトのリスト
+    セルベースのガントチャートシートを作成（ブラウザ版と同じ見た目）
     """
     try:
         ws = wb.create_sheet("納期ガントチャート", 0)
-        
+
         # ========================================
-        # 1. ヘッダー設定
-        # ========================================
-        ws['A1'] = f"{seiban} 納期ガントチャート"
-        ws['A1'].font = Font(size=20, bold=True, color="1F4E78")
-        ws.merge_cells('A1:H1')
-        ws.row_dimensions[1].height = 35
-        ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
-        
-        # ========================================
-        # 2. データ収集
+        # 1. データ収集
         # ========================================
         unit_data = []
-        base_date = None
-        
+        all_dates = []
+
         for order in orders:
             unit_name = order.unit if order.unit else 'ユニット名無し'
-            
-            print(f"  処理中: {seiban}_{unit_name}, details数={len(order.details) if order.details else 0}")
-            
+
             if not order.details:
-                print(f"    ⚠️  スキップ: detailsが空")
                 continue
-            
-            # 納期を持つ詳細のみ抽出
+
             dates = []
             for detail in order.details:
                 if detail.delivery_date:
                     try:
                         date_str = detail.delivery_date.strip()
-                        
                         if not date_str or date_str == '-':
                             continue
-                        
                         if '/' in date_str:
                             parts = date_str.split('/')
                             if len(parts) == 3:
                                 year = int(parts[0])
                                 if year < 100:
                                     year = 2000 + year if year < 50 else 1900 + year
-                                month = int(parts[1])
-                                day = int(parts[2])
-                                date_obj = datetime(year, month, day)
+                                date_obj = datetime(year, int(parts[1]), int(parts[2]))
                                 dates.append(date_obj)
-                    except Exception as e:
-                        print(f"    ⚠️  日付パースエラー ({date_str}): {e}")
+                        elif '-' in date_str:
+                            parts = date_str.split('-')
+                            if len(parts) == 3:
+                                date_obj = datetime(int(parts[0]), int(parts[1]), int(parts[2]))
+                                dates.append(date_obj)
+                    except Exception:
                         continue
-            
-            print(f"    有効な納期: {len(dates)}件")
-            
+
             if dates:
                 min_date = min(dates)
                 max_date = max(dates)
-                
-                if base_date is None:
-                    base_date = min_date
-                else:
-                    base_date = min(base_date, min_date)
-                
+                all_dates.extend(dates)
                 unit_data.append({
                     'unit': unit_name,
                     'min_date': min_date,
                     'max_date': max_date,
-                    'count': len(order.details)
+                    'count': len(order.details),
+                    'detail_count': len(dates)
                 })
-                print(f"    ✅ ガントチャートに追加: {min_date.strftime('%Y/%m/%d')} ～ {max_date.strftime('%Y/%m/%d')}")
-            else:
-                print(f"    ⚠️  スキップ: 有効な納期データなし")
-        
-        if not unit_data or base_date is None:
-            ws['A5'] = '納期データがありません'
-            ws['A5'].font = Font(size=14, color="FF0000", bold=True)
-            print(f"⚠️  {seiban}: ガントチャート作成不可（データなし）")
+
+        if not unit_data or not all_dates:
+            ws['A3'] = '納期データがありません'
+            ws['A3'].font = Font(size=14, color="FF0000", bold=True)
             return
-        
+
+        # 日付範囲（7日前～7日後に余裕を持たせる）
+        global_min = min(all_dates) - timedelta(days=3)
+        global_max = max(all_dates) + timedelta(days=3)
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        total_days = (global_max - global_min).days + 1
+
+        # ユニットを最早納期順にソート
+        unit_data.sort(key=lambda x: x['min_date'])
+
         # ========================================
-        # 3. 基準日情報を表示
+        # 2. レイアウト定数
         # ========================================
-        max_days = max((data['max_date'] - base_date).days for data in unit_data)
-        end_date = base_date + timedelta(days=max_days)
-        
-        ws['A2'] = f"基準日: {base_date.strftime('%Y/%m/%d')}"
-        ws['A2'].font = Font(size=12, bold=True, color="FF0000")
-        
-        ws['D2'] = f"期間: {base_date.strftime('%Y/%m/%d')} ～ {end_date.strftime('%Y/%m/%d')} （{max_days + 1}日間）"
-        ws['D2'].font = Font(size=11, italic=True, color="1F4E78")
-        ws.merge_cells('D2:G2')
-        
+        HEADER_ROW = 1       # タイトル
+        INFO_ROW = 2         # 期間情報
+        DATE_HEADER_ROW = 3  # 日付ヘッダー（月表示）
+        DAY_HEADER_ROW = 4   # 日付ヘッダー（日表示）
+        DATA_START_ROW = 5   # データ開始
+        UNIT_COL = 1         # ユニット名列
+        INFO_COL = 2         # 情報列（期間・件数）
+        BAR_START_COL = 3    # バー開始列
+
         # ========================================
-        # 4. 列ヘッダー
+        # 3. タイトル・情報
         # ========================================
-        headers = ['ユニット', '最早納期', '最遅納期', '期間(日)', '開始日数', '件数']
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=4, column=col, value=header)
-            cell.font = Font(bold=True, color="FFFFFF", size=11)
-            cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        ws.cell(row=HEADER_ROW, column=UNIT_COL, value=f"{seiban} 納期ガントチャート")
+        ws.cell(row=HEADER_ROW, column=UNIT_COL).font = Font(size=16, bold=True, color="1F4E78")
+        ws.merge_cells(start_row=HEADER_ROW, start_column=UNIT_COL,
+                        end_row=HEADER_ROW, end_column=min(BAR_START_COL + 15, BAR_START_COL + total_days - 1))
+        ws.row_dimensions[HEADER_ROW].height = 28
+
+        period_text = f"期間: {global_min.strftime('%Y/%m/%d')} ～ {global_max.strftime('%Y/%m/%d')}  今日: {today.strftime('%Y/%m/%d')}  ユニット数: {len(unit_data)}"
+        ws.cell(row=INFO_ROW, column=UNIT_COL, value=period_text)
+        ws.cell(row=INFO_ROW, column=UNIT_COL).font = Font(size=10, italic=True, color="666666")
+        ws.row_dimensions[INFO_ROW].height = 18
+
+        # ========================================
+        # 4. 日付ヘッダー
+        # ========================================
+        thin_border = Border(
+            left=Side(style='thin', color="DDDDDD"),
+            right=Side(style='thin', color="DDDDDD"),
+            top=Side(style='thin', color="DDDDDD"),
+            bottom=Side(style='thin', color="DDDDDD")
+        )
+
+        # ユニット列・情報列ヘッダー
+        for row in [DATE_HEADER_ROW, DAY_HEADER_ROW]:
+            cell = ws.cell(row=row, column=UNIT_COL, value="ユニット" if row == DATE_HEADER_ROW else "")
+            cell.font = Font(bold=True, size=9, color="FFFFFF")
+            cell.fill = PatternFill(start_color="333333", end_color="333333", fill_type="solid")
             cell.alignment = Alignment(horizontal='center', vertical='center')
-            cell.border = Border(
-                left=Side(style='thin', color="000000"),
-                right=Side(style='thin', color="000000"),
-                top=Side(style='thin', color="000000"),
-                bottom=Side(style='thin', color="000000")
+            cell.border = thin_border
+
+            cell2 = ws.cell(row=row, column=INFO_COL, value="納期" if row == DATE_HEADER_ROW else "")
+            cell2.font = Font(bold=True, size=9, color="FFFFFF")
+            cell2.fill = PatternFill(start_color="333333", end_color="333333", fill_type="solid")
+            cell2.alignment = Alignment(horizontal='center', vertical='center')
+            cell2.border = thin_border
+
+        # 日付列ヘッダー
+        weekend_fill = PatternFill(start_color="FFF0F0", end_color="FFF0F0", fill_type="solid")
+        today_fill = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")
+        header_fill = PatternFill(start_color="F0F0F0", end_color="F0F0F0", fill_type="solid")
+
+        prev_month = None
+        month_start_col = None
+
+        for day_offset in range(total_days):
+            col = BAR_START_COL + day_offset
+            current_date = global_min + timedelta(days=day_offset)
+            is_weekend = current_date.weekday() >= 5
+            is_today = current_date.date() == today.date()
+
+            # 月ヘッダー（月が変わったらマージ）
+            current_month = current_date.strftime('%Y/%m')
+            if current_month != prev_month:
+                if prev_month is not None and month_start_col is not None:
+                    if col - 1 > month_start_col:
+                        ws.merge_cells(start_row=DATE_HEADER_ROW, start_column=month_start_col,
+                                        end_row=DATE_HEADER_ROW, end_column=col - 1)
+                month_start_col = col
+                cell = ws.cell(row=DATE_HEADER_ROW, column=col, value=current_date.strftime('%Y年%m月'))
+                cell.font = Font(bold=True, size=8, color="333333")
+                cell.fill = header_fill
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+                cell.border = thin_border
+                prev_month = current_month
+
+            # 日ヘッダー
+            weekday_names = ['月', '火', '水', '木', '金', '土', '日']
+            day_label = f"{current_date.day}"
+            cell = ws.cell(row=DAY_HEADER_ROW, column=col, value=day_label)
+            cell.font = Font(size=7, color="CC0000" if is_weekend else ("333333"))
+            if is_today:
+                cell.fill = today_fill
+                cell.font = Font(size=7, bold=True, color="856404")
+            elif is_weekend:
+                cell.fill = weekend_fill
+            else:
+                cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = thin_border
+
+        # 最後の月のマージ
+        if month_start_col is not None:
+            last_col = BAR_START_COL + total_days - 1
+            if last_col > month_start_col:
+                ws.merge_cells(start_row=DATE_HEADER_ROW, start_column=month_start_col,
+                                end_row=DATE_HEADER_ROW, end_column=last_col)
+
+        # ========================================
+        # 5. データ行（ユニットごとのバー）
+        # ========================================
+        for idx, data in enumerate(unit_data):
+            row = DATA_START_ROW + idx
+            color = UNIT_COLORS[idx % len(UNIT_COLORS)]
+            bar_fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
+
+            # ユニット名
+            cell = ws.cell(row=row, column=UNIT_COL, value=data['unit'])
+            cell.font = Font(size=9, bold=True)
+            cell.alignment = Alignment(horizontal='left', vertical='center')
+            cell.border = thin_border
+
+            # 納期情報
+            period_info = f"{data['min_date'].strftime('%m/%d')}～{data['max_date'].strftime('%m/%d')} ({data['detail_count']}件)"
+            cell2 = ws.cell(row=row, column=INFO_COL, value=period_info)
+            cell2.font = Font(size=8, color="666666")
+            cell2.alignment = Alignment(horizontal='center', vertical='center')
+            cell2.border = thin_border
+
+            # バーを描画
+            bar_start = (data['min_date'] - global_min).days
+            bar_end = (data['max_date'] - global_min).days
+
+            for day_offset in range(total_days):
+                col = BAR_START_COL + day_offset
+                current_date = global_min + timedelta(days=day_offset)
+                is_weekend = current_date.weekday() >= 5
+                is_today = current_date.date() == today.date()
+                cell = ws.cell(row=row, column=col)
+                cell.border = thin_border
+
+                if bar_start <= day_offset <= bar_end:
+                    # バー範囲内
+                    cell.fill = bar_fill
+                    # バーの中央付近にユニット名を表示
+                    mid_offset = (bar_start + bar_end) // 2
+                    if day_offset == mid_offset:
+                        cell.value = data['unit']
+                        cell.font = Font(size=7, bold=True, color="FFFFFF")
+                        cell.alignment = Alignment(horizontal='center', vertical='center')
+                elif is_today:
+                    cell.fill = PatternFill(start_color="FFEEEE", end_color="FFEEEE", fill_type="solid")
+                elif is_weekend:
+                    cell.fill = PatternFill(start_color="FAFAFA", end_color="FAFAFA", fill_type="solid")
+
+            ws.row_dimensions[row].height = 22
+
+        # ========================================
+        # 6. 今日の列を赤枠で強調
+        # ========================================
+        today_offset = (today - global_min).days
+        if 0 <= today_offset < total_days:
+            today_col = BAR_START_COL + today_offset
+            today_border = Border(
+                left=Side(style='medium', color="FF0000"),
+                right=Side(style='medium', color="FF0000"),
+                top=Side(style='thin', color="DDDDDD"),
+                bottom=Side(style='thin', color="DDDDDD")
             )
-        
+            for r in range(DATE_HEADER_ROW, DATA_START_ROW + len(unit_data)):
+                ws.cell(row=r, column=today_col).border = today_border
+
         # ========================================
-        # 5. データ行を書き込み
+        # 7. 凡例行
         # ========================================
-        row_idx = 5
-        for data in sorted(unit_data, key=lambda x: x['min_date']):
-            start_days = (data['min_date'] - base_date).days
-            duration = max(1, (data['max_date'] - data['min_date']).days + 1)
-            
-            row_values = [
-                data['unit'],
-                data['min_date'].strftime('%Y/%m/%d'),
-                data['max_date'].strftime('%Y/%m/%d'),
-                duration,
-                start_days,
-                data['count']
-            ]
-            
-            for col, value in enumerate(row_values, 1):
-                cell = ws.cell(row=row_idx, column=col, value=value)
-                cell.alignment = Alignment(
-                    horizontal='center' if col > 1 else 'left',
-                    vertical='center'
-                )
-                cell.border = Border(
-                    left=Side(style='thin', color="CCCCCC"),
-                    right=Side(style='thin', color="CCCCCC"),
-                    top=Side(style='thin', color="CCCCCC"),
-                    bottom=Side(style='thin', color="CCCCCC")
-                )
-                
-                # 期間が長い場合は背景色を変更
-                if col == 4 and value > 10:
-                    cell.fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
-            
-            row_idx += 1
-        
+        legend_row = DATA_START_ROW + len(unit_data) + 1
+        ws.cell(row=legend_row, column=UNIT_COL, value="凡例:").font = Font(size=9, bold=True)
+        for idx, data in enumerate(unit_data):
+            col = INFO_COL + idx
+            color = UNIT_COLORS[idx % len(UNIT_COLORS)]
+            cell = ws.cell(row=legend_row, column=col, value=data['unit'])
+            cell.fill = PatternFill(start_color=color, end_color=color, fill_type="solid")
+            cell.font = Font(size=8, bold=True, color="FFFFFF")
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
         # ========================================
-        # 6. ガントチャート作成
+        # 8. 列幅・行高さ調整
         # ========================================
-        chart = BarChart()
-        chart.type = "bar"
-        chart.style = 12
-        chart.title = f"{seiban} 納期ガントチャート"
-        
-        # Y軸（ユニット名）の設定
-        chart.y_axis.title = 'ユニット'
-        chart.y_axis.delete = False
-        
-        # X軸（日数）の設定
-        chart.x_axis.title = f'日数（基準日: {base_date.strftime("%Y/%m/%d")}）'
-        chart.x_axis.delete = False
-        
-        # カテゴリ軸（ユニット名）を設定
-        cats_ref = Reference(ws, min_col=1, min_row=5, max_row=row_idx-1)
-        chart.set_categories(cats_ref)
-        
-        # 開始日数のデータ（透明バー）
-        start_ref = Reference(ws, min_col=5, min_row=4, max_row=row_idx-1)
-        chart.add_data(start_ref, titles_from_data=True)
-        
-        # 期間のデータ（色付きバー）
-        duration_ref = Reference(ws, min_col=4, min_row=4, max_row=row_idx-1)
-        chart.add_data(duration_ref, titles_from_data=True)
-        
-        # スタック表示
-        chart.grouping = "stacked"
-        chart.overlap = 100
-        
-        # 系列の色設定
-        if len(chart.series) >= 1:
-            chart.series[0].graphicalProperties.solidFill = "FFFFFF"
-            chart.series[0].graphicalProperties.line.noFill = True
-        
-        if len(chart.series) >= 2:
-            chart.series[1].graphicalProperties.solidFill = "4472C4"
-        
-        chart.legend = None
-        
-        # チャートサイズ調整
-        chart.width = 22
-        chart.height = max(12, len(unit_data) * 1.5)
-        
-        # グリッド線を設定
-        chart.x_axis.majorGridlines = None
-        chart.y_axis.majorGridlines = None
-        
-        # チャートを配置
-        ws.add_chart(chart, "H5")
-        
+        ws.column_dimensions[get_column_letter(UNIT_COL)].width = 18
+        ws.column_dimensions[get_column_letter(INFO_COL)].width = 16
+        for day_offset in range(total_days):
+            col_letter = get_column_letter(BAR_START_COL + day_offset)
+            ws.column_dimensions[col_letter].width = 3.5
+
+        ws.row_dimensions[DATE_HEADER_ROW].height = 18
+        ws.row_dimensions[DAY_HEADER_ROW].height = 16
+
         # ========================================
-        # 7. 日付対応表をチャート右側に追加
+        # 9. 印刷設定（横向き）
         # ========================================
-        from openpyxl.utils import get_column_letter
-        
-        date_table_col = 26  # Z列
-        date_table_row = 5
-        
-        # ヘッダー
-        ws.cell(row=date_table_row, column=date_table_col, value="日数→日付").font = Font(bold=True, size=11, color="1F4E78")
-        ws.cell(row=date_table_row + 1, column=date_table_col, value="日数").font = Font(bold=True, size=10)
-        ws.cell(row=date_table_row + 1, column=date_table_col + 1, value="日付").font = Font(bold=True, size=10)
-        
-        # 5日ごとに日付を表示
-        table_row = date_table_row + 2
-        for i in range(0, max_days + 1, 5):
-            current_date = base_date + timedelta(days=i)
-            ws.cell(row=table_row, column=date_table_col, value=i)
-            ws.cell(row=table_row, column=date_table_col + 1, value=current_date.strftime('%m/%d'))
-            table_row += 1
-        
-        # 列幅調整（get_column_letterを使用）
-        ws.column_dimensions[get_column_letter(date_table_col)].width = 8
-        ws.column_dimensions[get_column_letter(date_table_col + 1)].width = 10
-        
-        # ========================================
-        # 8. 列幅調整
-        # ========================================
-        ws.column_dimensions['A'].width = 22
-        ws.column_dimensions['B'].width = 12
-        ws.column_dimensions['C'].width = 12
-        ws.column_dimensions['D'].width = 10
-        ws.column_dimensions['E'].width = 10
-        ws.column_dimensions['F'].width = 8
-        
-        print(f"✅ ガントチャート作成完了: {len(unit_data)}ユニット、基準日={base_date.strftime('%Y/%m/%d')}")
-        
+        ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+        ws.page_setup.paperSize = ws.PAPERSIZE_A4
+        ws.page_setup.fitToPage = True
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+
+        # ウィンドウ枠の固定（ユニット名と日付ヘッダーを固定）
+        ws.freeze_panes = ws.cell(row=DATA_START_ROW, column=BAR_START_COL)
+
+        print(f"✅ ガントチャート作成完了: {len(unit_data)}ユニット、{total_days}日間")
+
     except Exception as e:
         print(f"⚠️  ガントチャート作成エラー: {e}")
         import traceback
         traceback.print_exc()
-
-
-# ========================================
-# テスト用コード
-# ========================================
-if __name__ == '__main__':
-    class DummyDetail:
-        def __init__(self, delivery_date):
-            self.delivery_date = delivery_date
-    
-    class DummyOrder:
-        def __init__(self, unit, dates):
-            self.unit = unit
-            self.details = [DummyDetail(d) for d in dates]
-    
-    # ダミーデータ作成
-    orders = [
-        DummyOrder('カッター', ['25/10/14', '25/10/20', '25/10/30']),
-        DummyOrder('架台補修', ['25/10/27']),
-        DummyOrder('カッター昇降', ['25/10/31'])
-    ]
-    
-    # Excelファイル作成
-    wb = Workbook()
-    wb.remove(wb.active)
-    
-    create_gantt_chart_sheet(wb, 'MHT0614', orders)
-    
-    wb.save(r'\\SERVER3\Share-data\Document\仕入れ\002_手配リスト\手配発注リスト')
-    print("✅ テストファイル作成完了: gantt_final.xlsx")
