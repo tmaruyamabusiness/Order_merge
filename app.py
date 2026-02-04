@@ -1041,11 +1041,12 @@ def save_to_database(df, seiban_prefix):
                 db.session.flush()
                 print(f"✅ 新規ユニット作成: {seiban_prefix} - {unit_name or 'ユニット名無し'}")
             else:
-                # 🔥 既存レコードを更新
+                # 🔥 既存レコードを更新（remarks, image_path, location, pallet, statusは保持）
                 order.product_name = product_name
                 order.customer_abbr = info.get('customer_abbr', '')
                 order.memo2 = info.get('memo2', '')
-                print(f"🔄 既存ユニット更新: {seiban_prefix} - {unit_name or 'ユニット名無し'} (ID: {order.id})")
+                # order.remarks / order.image_path / order.location / order.pallet_number / order.status は変更しない
+                print(f"🔄 既存ユニット更新: {seiban_prefix} - {unit_name or 'ユニット名無し'} (ID: {order.id}, 備考保持: {'有' if order.remarks else '無'})")
             
             # 既存の詳細を削除して再作成
             OrderDetail.query.filter_by(order_id=order.id).delete()

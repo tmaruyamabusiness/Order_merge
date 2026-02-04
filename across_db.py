@@ -38,7 +38,7 @@ def format_value(value):
             return int(value)
         return float(value)
     elif isinstance(value, (datetime, date)):
-        return value.strftime('%Y-%m-%d')
+        return value.strftime('%y/%m/%d')
     else:
         return str(value).strip()
 
