@@ -133,6 +133,7 @@ class OrderDetail(db.Model):
     page_number = db.Column(db.String(20))
     row_number = db.Column(db.String(20))
     hierarchy = db.Column(db.Integer)
+    reply_delivery_date = db.Column(db.String(20))  # 回答納期
     # (children関係）
     children = db.relationship('OrderDetail', 
                             backref=db.backref('parent', remote_side=[id]),
@@ -249,6 +250,14 @@ class ProcessingHistory(db.Model):
 # Initialize database
 with app.app_context():
     db.create_all()
+    # マイグレーション: reply_delivery_date カラム追加
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(db.text("ALTER TABLE order_detail ADD COLUMN reply_delivery_date VARCHAR(20)"))
+            conn.commit()
+        print("✓ reply_delivery_date カラムを追加しました")
+    except Exception:
+        pass  # 既に存在する場合は無視
 
 def to_jst(utc_dt):
     """UTC時刻をJSTに変換"""
@@ -722,7 +731,8 @@ def create_order_detail_with_parts(row, order, all_received_items, safe_str, saf
         part_number=safe_str(row.get('部品No', '')),
         page_number=safe_str(row.get('ページNo', '')),
         row_number=safe_str(row.get('行No', '')),
-        hierarchy=safe_int(row.get('階層', 0))
+        hierarchy=safe_int(row.get('階層', 0)),
+        reply_delivery_date=safe_str(row.get('回答納期', ''))
     )
     
     _restore_received_status(detail, all_received_items)
@@ -2459,6 +2469,40 @@ def across_db_order_detail():
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
+@app.route('/api/across-db/process', methods=['POST'])
+def across_db_process():
+    """DB直接クエリでマージ→DB保存（Excel不要）"""
+    try:
+        data = request.json
+        seiban = data.get('seiban', '').strip()
+        order_date_from = data.get('order_date_from')
+        order_date_to = data.get('order_date_to')
+
+        if not seiban:
+            return jsonify({'success': False, 'error': '製番を入力してください'}), 400
+
+        # DB直接クエリでマージ済みDataFrameを取得
+        df_merged = across_db.merge_from_db(seiban, order_date_from, order_date_to)
+
+        if df_merged is None or len(df_merged) == 0:
+            return jsonify({
+                'success': False,
+                'error': f'製番 {seiban} のデータが見つかりません（Across DB）'
+            })
+
+        # 既存のsave_to_database()でDB保存
+        save_to_database(df_merged, seiban)
+
+        return jsonify({
+            'success': True,
+            'message': f'{seiban} の処理が完了しました（{len(df_merged)}件 - DB直接取得）'
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/api/across-db/merge-test')
 def across_db_merge_test():
     """製番でマージテスト（V_D手配リスト + V_D発注）"""
@@ -2709,6 +2753,7 @@ def get_delivery_schedule():
                     'unit_measure': detail.unit_measure or '',
                     'is_received': detail.is_received,
                     'delivery_date': detail.delivery_date,
+                    'reply_delivery_date': detail.reply_delivery_date or '',
                     'order_type': detail.order_type or '',
                     'order_type_code': detail.order_type_code or '',
                     'product_name': order.product_name or '',
@@ -2916,6 +2961,7 @@ def receive_page(seiban, unit=''):
             details.append({
                 'id': detail.id,
                 'delivery_date': detail.delivery_date,
+                'reply_delivery_date': detail.reply_delivery_date or '',
                 'supplier': detail.supplier,
                 'order_number': detail.order_number,
                 'quantity': detail.quantity,
@@ -3884,6 +3930,7 @@ def get_order_details(order_id):
             detail_dict = {
                 'id': detail.id,
                 'delivery_date': detail.delivery_date,
+                'reply_delivery_date': detail.reply_delivery_date or '',
                 'supplier': detail.supplier,
                 'order_number': detail.order_number,
                 'quantity': detail.quantity,
@@ -4324,6 +4371,7 @@ def search_by_spec1(spec1):
                 'unit_measure': detail.unit_measure,
                 'is_received': detail.is_received,
                 'delivery_date': detail.delivery_date,
+                'reply_delivery_date': detail.reply_delivery_date or '',
                 'supplier': detail.supplier,
                 'staff': '',
                 'source': 'merged'
@@ -4454,6 +4502,7 @@ def search_by_purchase_order(purchase_order_number):
                 'unit_measure': detail.unit_measure,
                 'is_received': detail.is_received,
                 'delivery_date': detail.delivery_date,
+                'reply_delivery_date': detail.reply_delivery_date or '',
                 'supplier': detail.supplier,
                 'source': 'merged',
                 'staff': '-'

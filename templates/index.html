@@ -208,12 +208,14 @@
                                     <button class="btn btn-sm btn-secondary" onclick="deselectAllSeibanCheckboxes()">全解除</button>
                                     <span id="seibanCheckCount" style="color: #666; font-size: 0.85em; margin-left: 5px;"></span>
                                     <button class="btn btn-success" onclick="processBatchSeibans()" style="margin-left: auto; padding: 6px 16px;">一括処理</button>
+                                    <button class="btn btn-success" onclick="processBatchSeibansFromDB()" style="padding: 6px 16px; background: #7b1fa2;">🗄️ DB直接一括処理</button>
                                 </div>
                             </div>
                             <input type="text" id="seibanInput" placeholder="MHT0123（手動入力も可）" style="margin-top: 4px;">
                             <small style="color: #666;">一覧からチェックして一括処理、または手動入力で単体処理</small>
                         </div>
                         <button class="btn btn-primary" onclick="processFile()">処理開始（手動入力）</button>
+                        <button class="btn btn-primary" onclick="processFileFromDB()" style="margin-left: 8px; background: #7b1fa2;">🗄️ DB直接処理</button>
                         <div id="batchProgressContainer" style="display: none; margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
                             <div style="margin-bottom: 8px;"><strong id="batchProgressTitle">一括処理中...</strong></div>
                             <div style="background: #e9ecef; border-radius: 10px; overflow: hidden; height: 24px; margin-bottom: 8px;">
@@ -779,6 +781,7 @@
                                                 <th>仕様１</th>
                                                 <th>数量</th>
                                                 <th>納期</th>
+                                                <th>回答納期</th>
                                                 <th>仕入先</th>
                                                 <th>発注者</th>
                                                 <th>受入状態</th>
@@ -807,6 +810,7 @@
                                     <td title="${detail.spec1 || '-'}">${detail.spec1 || '-'}</td>
                                     <td>${detail.quantity} ${detail.unit_measure || ''}</td>
                                     <td>${detail.delivery_date || '-'}</td>
+                                    <td style="color: ${detail.reply_delivery_date ? '#d32f2f' : '#ccc'};">${detail.reply_delivery_date || '-'}</td>
                                     <td>${detail.supplier || '-'}</td>
                                     <td>${detail.staff || '-'}</td>
                                     <td>
@@ -907,6 +911,7 @@
                                                 <th>仕様１</th>
                                                 <th>数量</th>
                                                 <th>納期</th>
+                                                <th>回答納期</th>
                                                 <th>仕入先</th>
                                                 <th>発注者</th>
                                                 <th>受入状態</th>
@@ -937,6 +942,7 @@
                                     </td>
                                     <td>${detail.quantity} ${detail.unit_measure || ''}</td>
                                     <td>${detail.delivery_date || '-'}</td>
+                                    <td style="color: ${detail.reply_delivery_date ? '#d32f2f' : '#ccc'};">${detail.reply_delivery_date || '-'}</td>
                                     <td>${detail.supplier || '-'}</td>
                                     <td>${detail.staff || '-'}</td>
                                     <td>
@@ -2109,6 +2115,107 @@
             }
         }
 
+        // DB直接処理（手動入力）
+        async function processFileFromDB() {
+            const seiban = document.getElementById('seibanInput').value.trim();
+            if (!seiban) {
+                alert('製番を入力してください');
+                return;
+            }
+
+            let orderDateFrom = null;
+            let orderDateTo = null;
+            if (document.getElementById('enableOrderDateFilter').checked) {
+                orderDateFrom = document.getElementById('orderDateFrom').value || null;
+                orderDateTo = document.getElementById('orderDateTo').value || null;
+            }
+
+            document.getElementById('loadingIndicator').style.display = 'block';
+
+            try {
+                const response = await fetch('/api/across-db/process', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ seiban, order_date_from: orderDateFrom, order_date_to: orderDateTo })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    alert('🗄️ ' + data.message);
+                    loadOrders();
+                    document.getElementById('seibanInput').value = '';
+                    deselectAllSeibanCheckboxes();
+                } else {
+                    alert('エラー: ' + data.error);
+                }
+            } catch (error) {
+                alert('DB直接処理エラー: ' + error);
+            } finally {
+                document.getElementById('loadingIndicator').style.display = 'none';
+            }
+        }
+
+        // DB直接一括処理
+        async function processBatchSeibansFromDB() {
+            const checkboxes = document.querySelectorAll('.seiban-checkbox:checked');
+            if (checkboxes.length === 0) {
+                alert('処理する製番を選択してください');
+                return;
+            }
+
+            const seibans = Array.from(checkboxes).map(cb => cb.value);
+            if (!confirm(`🗄️ DB直接取得で ${seibans.length} 件の製番を処理しますか？\n\n${seibans.join(', ')}`)) {
+                return;
+            }
+
+            let orderDateFrom = null;
+            let orderDateTo = null;
+            if (document.getElementById('enableOrderDateFilter').checked) {
+                orderDateFrom = document.getElementById('orderDateFrom').value || null;
+                orderDateTo = document.getElementById('orderDateTo').value || null;
+            }
+
+            // バッチ進捗表示
+            const container = document.getElementById('batchProgressContainer');
+            const progressBar = document.getElementById('batchProgressBar');
+            const progressTitle = document.getElementById('batchProgressTitle');
+            const batchLog = document.getElementById('batchLog');
+            container.style.display = 'block';
+            batchLog.innerHTML = '';
+
+            let successCount = 0;
+            let failCount = 0;
+
+            for (let i = 0; i < seibans.length; i++) {
+                const seiban = seibans[i];
+                const pct = Math.round(((i + 1) / seibans.length) * 100);
+                progressBar.style.width = pct + '%';
+                progressBar.textContent = pct + '%';
+                progressTitle.textContent = `🗄️ DB直接一括処理中... (${i + 1}/${seibans.length})`;
+
+                try {
+                    const response = await fetch('/api/across-db/process', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ seiban, order_date_from: orderDateFrom, order_date_to: orderDateTo })
+                    });
+                    const data = await response.json();
+                    if (data.success) {
+                        successCount++;
+                        batchLog.innerHTML += '<div style="color:green;">✓ ' + seiban + ': ' + data.message + '</div>';
+                    } else {
+                        failCount++;
+                        batchLog.innerHTML += '<div style="color:red;">✗ ' + seiban + ': ' + data.error + '</div>';
+                    }
+                } catch (e) {
+                    failCount++;
+                    batchLog.innerHTML += '<div style="color:red;">✗ ' + seiban + ': ' + e + '</div>';
+                }
+            }
+
+            progressTitle.textContent = `🗄️ DB直接一括処理完了: 成功 ${successCount}件 / 失敗 ${failCount}件`;
+            loadOrders();
+        }
+
         async function loadOrders() {
             try {
                 const response = await fetch('/api/orders');
@@ -2695,6 +2802,7 @@
                                         <th>検収日</th>
                                         <th>検収数</th>
                                         <th>納期</th>
+                                        <th>回答納期</th>
                                         <th>仕入先</th>
                                         <th>発注番号</th>
                                         <th>数量</th>
@@ -2889,6 +2997,7 @@
                                 <td style="color: ${parent.received_delivery_date ? '#2196f3' : '#999'};">${parent.received_delivery_date || '-'}</td>
                                 <td style="color: ${parentDeliveryQty ? '#2196f3' : '#999'};">${parentDeliveryQty || '-'}</td>
                                 <td>${parent.delivery_date || '-'}</td>
+                                <td style="color: ${parent.reply_delivery_date ? '#d32f2f' : '#ccc'}; font-weight: ${parent.reply_delivery_date ? 'bold' : 'normal'};">${parent.reply_delivery_date || '-'}</td>
                                 <td>${parent.supplier || '-'}</td>
                                 <td>${parent.order_number || '-'}</td>
                                 <td>${parent.quantity || ''} ${parent.unit_measure || ''}</td>
@@ -2915,6 +3024,7 @@
                                     <td style="color: ${child.received_delivery_date ? '#2196f3' : '#999'};">${child.received_delivery_date || '-'}</td>
                                     <td style="color: ${childDeliveryQty ? '#2196f3' : '#999'};">${childDeliveryQty || '-'}</td>
                                     <td>${child.delivery_date || '-'}</td>
+                                    <td style="color: ${child.reply_delivery_date ? '#d32f2f' : '#ccc'}; font-weight: ${child.reply_delivery_date ? 'bold' : 'normal'};">${child.reply_delivery_date || '-'}</td>
                                     <td>${child.supplier || '-'}</td>
                                     <td>${child.order_number || '-'}</td>
                                     <td>${child.quantity || ''} ${child.unit_measure || ''}</td>
