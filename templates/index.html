@@ -16,6 +16,7 @@
     <script src="/static/qr-scanner.js"></script>
     <script src="/static/pallet-manager.js"></script>
     <script src="/static/delivery-schedule.js"></script>
+    <script src="/static/across-db.js"></script>
 </head>
 <body>
     <div class="container">
@@ -273,6 +274,57 @@
                     <div class="loading" id="loadingIndicator">
                         <div class="spinner"></div>
                         <p>処理中...</p>
+                    </div>
+
+                    <!-- Across DB テストセクション -->
+                    <div class="upload-section" style="background: #f3e5f5; border: 2px solid #ce93d8;">
+                        <h2>🗄️ Across DB テスト</h2>
+                        <p style="color: #666; font-size: 0.9em;">V_D系ビュー（読み取り専用）に直接クエリを実行します</p>
+
+                        <!-- 接続テスト -->
+                        <div style="margin-bottom: 15px;">
+                            <button class="btn btn-info" onclick="testAcrossConnection()">接続テスト</button>
+                            <span id="acrossTestResult" style="margin-left: 10px;"></span>
+                        </div>
+
+                        <!-- クイック発注番号検索 -->
+                        <div style="background: #fff; padding: 12px; border-radius: 6px; margin-bottom: 15px;">
+                            <h3 style="margin-top:0; font-size:1em;">🔍 発注番号クイック検索</h3>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <input type="text" id="acrossQuickOrderInput" placeholder="発注番号（例: 89074）" style="flex:1; padding:8px;">
+                                <button class="btn btn-primary" onclick="quickSearchOrder()">検索</button>
+                            </div>
+                            <small style="color:#888;">自動で8桁ゼロパディングされます</small>
+                            <div id="acrossQuickResult" style="margin-top: 10px;"></div>
+                        </div>
+
+                        <!-- ビュー自由検索 -->
+                        <div style="background: #fff; padding: 12px; border-radius: 6px;">
+                            <h3 style="margin-top:0; font-size:1em;">📋 ビュー自由検索</h3>
+                            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px;">
+                                <select id="acrossViewSelect" onchange="onAcrossViewChange()" style="padding: 8px;">
+                                    <option value="V_D発注">V_D発注（発注データ）</option>
+                                    <option value="V_D発注残">V_D発注残（発注残・納入状況）</option>
+                                    <option value="V_D手配リスト">V_D手配リスト（BOM）</option>
+                                    <option value="V_D仕入">V_D仕入（仕入実績）</option>
+                                </select>
+                                <select id="acrossSearchType" style="padding: 8px;">
+                                    <option value="発注番号">発注番号</option>
+                                    <option value="製番">製番</option>
+                                    <option value="">全件（上位N件）</option>
+                                </select>
+                                <input type="text" id="acrossSearchInput" placeholder="例: 89074 または MHT0620" style="flex:1; min-width:150px; padding:8px;">
+                                <select id="acrossLimit" style="padding: 8px; width: 100px;">
+                                    <option value="20">20件</option>
+                                    <option value="50">50件</option>
+                                    <option value="100" selected>100件</option>
+                                    <option value="500">500件</option>
+                                </select>
+                                <button class="btn btn-success" onclick="executeAcrossQuery()">クエリ実行</button>
+                            </div>
+                            <div id="acrossColumns" style="margin-bottom: 8px;"></div>
+                            <div id="acrossQueryResult"></div>
+                        </div>
                     </div>
 
                     <!-- 手動アップロードセクション -->

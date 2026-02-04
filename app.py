@@ -2402,6 +2402,72 @@ def load_from_odbc_endpoint():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ========== Across DB 直接クエリ API ==========
+import across_db
+
+@app.route('/api/across-db/test')
+def across_db_test():
+    """Across DB 接続テスト"""
+    try:
+        result = across_db.test_connection()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/across-db/columns')
+def across_db_columns():
+    """ビューのカラム一覧取得"""
+    try:
+        view_name = request.args.get('view', 'V_D発注')
+        columns = across_db.get_view_columns(view_name)
+        return jsonify({'columns': columns})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/api/across-db/query')
+def across_db_query():
+    """ビューへの自由検索"""
+    try:
+        view_name = request.args.get('view', 'V_D発注')
+        search_type = request.args.get('search_type', '')
+        search_value = request.args.get('search_value', '').strip()
+        limit = min(int(request.args.get('limit', 100)), 500)
+
+        where_clause = None
+        params = None
+
+        if search_type and search_value:
+            if search_type == '発注番号':
+                # ゼロパディング対応
+                search_value = search_value.zfill(8)
+            where_clause = f'{search_type} = ?'
+            params = [search_value]
+
+        result = across_db.query_view(view_name, where_clause, params, limit)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/api/across-db/order-detail')
+def across_db_order_detail():
+    """発注番号の詳細情報（発注 + 発注残 + 仕入を統合）"""
+    try:
+        order_number = request.args.get('order_number', '').strip()
+        if not order_number:
+            return jsonify({'error': '発注番号を入力してください'}), 400
+
+        order = across_db.search_order(order_number)
+        remaining = across_db.search_order_remaining(order_number)
+        receipts = across_db.search_receipts(order_number)
+
+        return jsonify({
+            'order': order,
+            'remaining': remaining,
+            'receipts': receipts
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
 @app.route('/api/get-system-status')
 def get_system_status():
     """Get system status including cache and refresh info"""
