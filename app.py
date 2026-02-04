@@ -2459,6 +2459,19 @@ def across_db_order_detail():
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
+@app.route('/api/across-db/merge-test')
+def across_db_merge_test():
+    """製番でマージテスト（V_D手配リスト + V_D発注）"""
+    try:
+        seiban = request.args.get('seiban', '').strip()
+        if not seiban:
+            return jsonify({'error': '製番を入力してください'}), 400
+
+        result = across_db.merge_test_by_seiban(seiban)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
 @app.route('/api/get-system-status')
 def get_system_status():
     """Get system status including cache and refresh info"""

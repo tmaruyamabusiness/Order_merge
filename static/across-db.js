@@ -251,6 +251,121 @@ function renderOrderDetail(data, container) {
     container.innerHTML = html;
 }
 
+// ========== 製番マージテスト ==========
+async function executeMergeTest() {
+    const seiban = document.getElementById('acrossMergeSeiban').value.trim();
+    if (!seiban) return;
+
+    const resultDiv = document.getElementById('acrossMergeResult');
+    resultDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">マージ処理中...</div>';
+
+    try {
+        const res = await fetch('/api/across-db/merge-test?seiban=' + encodeURIComponent(seiban));
+        const data = await res.json();
+
+        if (data.error) {
+            resultDiv.innerHTML = '<div class="alert alert-danger">' + escapeForTable(data.error) + '</div>';
+            return;
+        }
+
+        if (!data.success) {
+            resultDiv.innerHTML = '<div class="alert alert-danger">' + escapeForTable(data.error || '不明なエラー') + '</div>';
+            return;
+        }
+
+        renderMergeResult(data, resultDiv);
+
+    } catch (e) {
+        resultDiv.innerHTML = '<div class="alert alert-danger">マージテスト失敗: ' + e + '</div>';
+    }
+}
+
+function renderMergeResult(data, container) {
+    const stats = data.stats;
+    let html = '';
+
+    // 統計サマリー
+    const matchColor = stats.match_rate >= 80 ? '#28a745' : stats.match_rate >= 50 ? '#ffc107' : '#dc3545';
+    html += '<div style="background:#e8f5e9; padding:12px; border-radius:6px; margin-bottom:10px;">';
+    html += '<h4 style="margin:0 0 8px;">製番: ' + escapeForTable(data.seiban) + ' マージ結果</h4>';
+    html += '<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:6px; font-size:0.9em;">';
+    html += '<div style="background:#fff; padding:8px; border-radius:4px; text-align:center;">';
+    html += '<div style="font-size:1.5em; font-weight:bold;">' + stats.tehai_count + '</div>';
+    html += '<div style="color:#666;">手配リスト件数</div></div>';
+    html += '<div style="background:#fff; padding:8px; border-radius:4px; text-align:center;">';
+    html += '<div style="font-size:1.5em; font-weight:bold;">' + stats.hatchu_count + '</div>';
+    html += '<div style="color:#666;">発注データ件数</div></div>';
+    html += '<div style="background:#fff; padding:8px; border-radius:4px; text-align:center;">';
+    html += '<div style="font-size:1.5em; font-weight:bold; color:' + matchColor + ';">' + stats.match_rate + '%</div>';
+    html += '<div style="color:#666;">マッチ率 (' + stats.match_count + '/' + stats.tehai_count + ')</div></div>';
+    html += '<div style="background:#fff; padding:8px; border-radius:4px; text-align:center;">';
+    html += '<div style="font-size:1.5em; font-weight:bold;">' + stats.unit_count + '</div>';
+    html += '<div style="color:#666;">ユニット数</div></div>';
+    html += '</div>';
+
+    // ユニット一覧
+    if (stats.units && stats.units.length > 0) {
+        html += '<div style="margin-top:8px; font-size:0.85em;">';
+        html += '<strong>ユニット:</strong> ';
+        html += stats.units.map(u => '<span style="background:#e0e0e0; padding:2px 8px; border-radius:10px; margin:2px; display:inline-block;">' + escapeForTable(u || '(空)') + '</span>').join('');
+        html += '</div>';
+    }
+    html += '</div>';
+
+    // マージ結果テーブル
+    if (data.rows && data.rows.length > 0) {
+        html += '<div style="overflow-x:auto; max-height:500px; overflow-y:auto; border:1px solid #ddd; border-radius:5px;">';
+        html += '<table style="width:100%; border-collapse:collapse; font-size:0.8em; white-space:nowrap;">';
+
+        // ヘッダー
+        html += '<thead><tr style="position:sticky; top:0; z-index:1;">';
+        html += '<th style="padding:5px 8px; border:1px solid #ddd; background:#e0e0e0; color:#666;">#</th>';
+        for (const col of data.columns) {
+            let bg = '#e0e0e0';
+            if (['発注番号', '仕入先略称', '納期', '納入済数'].includes(col)) bg = '#c8e6c9';
+            if (col === 'match_type') bg = '#fff9c4';
+            html += '<th style="padding:5px 8px; border:1px solid #ddd; background:' + bg + ';">' + escapeForTable(col) + '</th>';
+        }
+        html += '</tr></thead><tbody>';
+
+        // データ
+        for (let i = 0; i < data.rows.length; i++) {
+            const row = data.rows[i];
+            const matchType = row[data.columns.indexOf('match_type')] || '';
+            const rowBg = matchType ? (i % 2 === 0 ? '#fff' : '#f9f9f9') : '#fff3e0';
+
+            html += '<tr style="background:' + rowBg + ';">';
+            html += '<td style="padding:3px 6px; border:1px solid #eee; color:#999; text-align:center;">' + (i + 1) + '</td>';
+            for (let j = 0; j < row.length; j++) {
+                const val = row[j];
+                const colName = data.columns[j];
+                let cellStyle = 'padding:3px 6px; border:1px solid #eee;';
+
+                // マージ由来カラムをハイライト
+                if (['発注番号', '仕入先略称', '納期', '納入済数'].includes(colName) && val) {
+                    cellStyle += ' background:#e8f5e9; font-weight:bold;';
+                }
+                if (colName === 'match_type') {
+                    if (val) {
+                        cellStyle += ' background:#c8e6c9; color:#2e7d32; font-size:0.85em;';
+                    } else {
+                        cellStyle += ' background:#ffcdd2; color:#c62828; font-size:0.85em;';
+                    }
+                }
+
+                const display = (val === null || val === '' || val === undefined)
+                    ? '<span style="color:#ccc;">-</span>'
+                    : escapeForTable(String(val));
+                html += '<td style="' + cellStyle + '">' + display + '</td>';
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table></div>';
+    }
+
+    container.innerHTML = html;
+}
+
 // ========== Enter キー対応 ==========
 document.addEventListener('DOMContentLoaded', function() {
     const searchInput = document.getElementById('acrossSearchInput');
@@ -263,6 +378,12 @@ document.addEventListener('DOMContentLoaded', function() {
     if (quickInput) {
         quickInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') quickSearchOrder();
+        });
+    }
+    const mergeInput = document.getElementById('acrossMergeSeiban');
+    if (mergeInput) {
+        mergeInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') executeMergeTest();
         });
     }
 });
