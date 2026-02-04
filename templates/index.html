@@ -311,6 +311,20 @@
                     </div>
                 </div>
 
+                <!-- 更新情報（備考・画像があるユニット一覧） -->
+                <div class="card" style="margin-bottom: 20px; padding: 20px; background: white; border: 1px solid #dee2e6; border-radius: 10px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                        <h3 style="margin: 0;">ℹ️ 更新情報</h3>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span id="updateInfoCount" style="font-size: 0.85em; color: #666;"></span>
+                            <button class="btn btn-sm btn-primary" onclick="loadUpdateInfo()">更新</button>
+                        </div>
+                    </div>
+                    <div id="updateInfoContent">
+                        <p style="text-align: center; padding: 15px; color: #6c757d; font-size: 0.9em;">「更新」ボタンで備考・画像のあるユニットを表示</p>
+                    </div>
+                </div>
+
                 <!-- 発注番号での検索・受入 -->
                 <div class="card" style="margin-bottom: 20px; padding: 20px; background: #f8f9fa; border-radius: 10px;">
                     <h3>🔍 発注番号で検索・受入</h3>
@@ -401,6 +415,13 @@
 
             <script>
 
+            // HTMLエスケープ（XSS防止）
+            function escapeHtml(text) {
+                if (!text) return '';
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
 
             let detectedSeibansList = [];
 
@@ -552,6 +573,88 @@
                 }, 3000);
             }
             
+            // 更新情報（備考・画像があるユニット一覧）を読み込み
+            async function loadUpdateInfo() {
+                const container = document.getElementById('updateInfoContent');
+                const countEl = document.getElementById('updateInfoCount');
+                if (!container) return;
+
+                container.innerHTML = '<p style="text-align: center; padding: 15px; color: #6c757d;">読み込み中...</p>';
+
+                try {
+                    const response = await fetch('/api/orders/update-info');
+                    const data = await response.json();
+
+                    if (!data.success) {
+                        container.innerHTML = `<p style="color: #dc3545;">エラー: ${data.error}</p>`;
+                        return;
+                    }
+
+                    if (data.orders.length === 0) {
+                        container.innerHTML = '<p style="text-align: center; padding: 15px; color: #6c757d;">備考・画像が設定されたユニットはありません</p>';
+                        if (countEl) countEl.textContent = '';
+                        return;
+                    }
+
+                    if (countEl) countEl.textContent = `${data.total}件`;
+
+                    // 製番でグループ化
+                    const grouped = {};
+                    data.orders.forEach(order => {
+                        if (!grouped[order.seiban]) grouped[order.seiban] = [];
+                        grouped[order.seiban].push(order);
+                    });
+
+                    let html = '<div style="display: flex; flex-direction: column; gap: 8px;">';
+
+                    Object.keys(grouped).sort().forEach(seiban => {
+                        html += `<div style="border: 1px solid #dee2e6; border-radius: 8px; overflow: hidden;">`;
+                        html += `<div style="padding: 8px 12px; background: #f1f3f5; font-weight: bold; font-size: 0.95em; cursor: pointer;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">
+                            ${seiban} <span style="color: #666; font-weight: normal; font-size: 0.85em;">(${grouped[seiban].length}件)</span>
+                        </div>`;
+                        html += `<div>`;
+
+                        grouped[seiban].forEach(order => {
+                            const statusColor = order.status === '納品完了' ? '#28a745' : order.status === '納品中' ? '#ffc107' : '#6c757d';
+                            html += `<div style="padding: 10px 12px; border-bottom: 1px solid #eee; cursor: pointer;" onclick="showOrderDetails(${order.order_id})">`;
+                            html += `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">`;
+                            html += `<strong style="font-size: 0.95em;">${order.unit || '(ユニット未設定)'}</strong>`;
+                            html += `<div style="display: flex; align-items: center; gap: 8px;">`;
+                            html += `<span style="background: ${statusColor}; color: ${order.status === '納品中' ? '#333' : '#fff'}; padding: 1px 8px; border-radius: 10px; font-size: 0.75em;">${order.status || '未設定'}</span>`;
+                            if (order.has_image) html += `<span style="font-size: 0.85em;">📷</span>`;
+                            html += `<span style="color: #999; font-size: 0.75em;">${order.updated_at}</span>`;
+                            html += `</div></div>`;
+
+                            if (order.remarks) {
+                                html += `<div style="font-size: 0.85em; color: #555; background: #fffbea; padding: 5px 8px; border-radius: 4px; border-left: 3px solid #ffc107; margin-top: 4px; white-space: pre-wrap; word-break: break-word;">${escapeHtml(order.remarks)}</div>`;
+                            }
+
+                            if (order.has_image) {
+                                html += `<div style="margin-top: 6px;"><img src="${order.image_url}" alt="画像" style="max-width: 200px; max-height: 120px; border-radius: 4px; border: 1px solid #dee2e6; cursor: pointer;" onclick="event.stopPropagation(); window.open('${order.image_url}', '_blank')"></div>`;
+                            }
+
+                            // 場所・パレット情報
+                            if (order.location !== '未設定' || order.pallet_number !== '未設定') {
+                                html += `<div style="font-size: 0.78em; color: #888; margin-top: 3px;">`;
+                                if (order.location !== '未設定') html += `場所: ${order.location} `;
+                                if (order.pallet_number !== '未設定') html += `棚: ${order.pallet_number}`;
+                                html += `</div>`;
+                            }
+
+                            html += `</div>`;
+                        });
+
+                        html += `</div></div>`;
+                    });
+
+                    html += '</div>';
+                    container.innerHTML = html;
+
+                } catch (error) {
+                    container.innerHTML = `<p style="color: #dc3545;">読み込みエラー: ${error}</p>`;
+                }
+            }
+
             // 発注番号で検索
             async function searchByPurchaseOrder() {
                 const purchaseOrderNumber = document.getElementById('purchaseOrderInput').value.trim();
@@ -1349,6 +1452,7 @@
                 loadOrders();
             } else if (tabName === 'receiving') {
                 loadDeliverySchedule();
+                loadUpdateInfo();
             } else if (tabName === 'archive') {
                 loadArchivedOrders();
             }

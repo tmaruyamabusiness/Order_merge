@@ -2498,6 +2498,51 @@ def get_orders():
         print(traceback.print_exc())
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/orders/update-info')
+def get_orders_update_info():
+    """備考・画像が設定されているユニットの一覧を取得"""
+    try:
+        from sqlalchemy import or_
+
+        orders = Order.query.filter(
+            Order.is_archived == False,
+            or_(
+                Order.remarks != None,
+                Order.remarks != '',
+                Order.image_path != None,
+                Order.image_path != ''
+            )
+        ).order_by(Order.updated_at.desc()).all()
+
+        # 備考または画像が実際に入っているものだけ抽出
+        result = []
+        for order in orders:
+            has_remarks = bool(order.remarks and order.remarks.strip())
+            has_image = bool(order.image_path and order.image_path.strip())
+            if not has_remarks and not has_image:
+                continue
+
+            result.append({
+                'order_id': order.id,
+                'seiban': order.seiban,
+                'unit': order.unit or '',
+                'status': order.status or '',
+                'location': order.floor or '未設定',
+                'pallet_number': order.pallet_number or '未設定',
+                'remarks': order.remarks or '',
+                'has_image': has_image,
+                'image_url': f'/api/order/{order.id}/image' if has_image else None,
+                'updated_at': order.updated_at.strftime('%m/%d %H:%M') if order.updated_at else ''
+            })
+
+        return jsonify({'success': True, 'orders': result, 'total': len(result)})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/delivery-schedule')
 def get_delivery_schedule():
     """今日の納品リストと1週間の予定を取得"""
