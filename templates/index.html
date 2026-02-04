@@ -298,6 +298,17 @@
                             <div id="acrossQuickResult" style="margin-top: 10px;"></div>
                         </div>
 
+                        <!-- マージテスト -->
+                        <div style="background: #fff; padding: 12px; border-radius: 6px; margin-bottom: 15px;">
+                            <h3 style="margin-top:0; font-size:1em;">🔄 製番マージテスト</h3>
+                            <p style="color:#888; font-size:0.85em; margin:0 0 8px;">V_D手配リスト × V_D発注 をマージし、現行Excel処理と同等の結果を生成</p>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <input type="text" id="acrossMergeSeiban" placeholder="製番（例: MHT0620）" style="flex:1; padding:8px;">
+                                <button class="btn btn-primary" onclick="executeMergeTest()">マージテスト実行</button>
+                            </div>
+                            <div id="acrossMergeResult" style="margin-top: 10px;"></div>
+                        </div>
+
                         <!-- ビュー自由検索 -->
                         <div style="background: #fff; padding: 12px; border-radius: 6px;">
                             <h3 style="margin-top:0; font-size:1em;">📋 ビュー自由検索</h3>
