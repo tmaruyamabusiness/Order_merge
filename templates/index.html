@@ -2156,7 +2156,7 @@
 
         // DB直接一括処理
         async function processBatchSeibansFromDB() {
-            const checkboxes = document.querySelectorAll('.seiban-checkbox:checked');
+            const checkboxes = document.querySelectorAll('.seiban-cb:checked');
             if (checkboxes.length === 0) {
                 alert('処理する製番を選択してください');
                 return;
@@ -2178,9 +2178,9 @@
             const container = document.getElementById('batchProgressContainer');
             const progressBar = document.getElementById('batchProgressBar');
             const progressTitle = document.getElementById('batchProgressTitle');
-            const batchLog = document.getElementById('batchLog');
+            const progressLog = document.getElementById('batchProgressLog');
             container.style.display = 'block';
-            batchLog.innerHTML = '';
+            progressLog.innerHTML = '';
 
             let successCount = 0;
             let failCount = 0;
@@ -2201,14 +2201,14 @@
                     const data = await response.json();
                     if (data.success) {
                         successCount++;
-                        batchLog.innerHTML += '<div style="color:green;">✓ ' + seiban + ': ' + data.message + '</div>';
+                        progressLog.innerHTML += '<div style="color:green;">✓ ' + seiban + ': ' + data.message + '</div>';
                     } else {
                         failCount++;
-                        batchLog.innerHTML += '<div style="color:red;">✗ ' + seiban + ': ' + data.error + '</div>';
+                        progressLog.innerHTML += '<div style="color:red;">✗ ' + seiban + ': ' + data.error + '</div>';
                     }
                 } catch (e) {
                     failCount++;
-                    batchLog.innerHTML += '<div style="color:red;">✗ ' + seiban + ': ' + e + '</div>';
+                    progressLog.innerHTML += '<div style="color:red;">✗ ' + seiban + ': ' + e + '</div>';
                 }
             }
 
