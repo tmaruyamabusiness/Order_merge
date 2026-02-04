@@ -8,7 +8,8 @@ let deliveryScheduleData = null;
 let dsFilters = {
     seiban: '',
     unit: '',
-    supplier: ''
+    supplier: '',
+    date: ''
 };
 
 // 納品予定を読み込み
@@ -23,6 +24,9 @@ async function loadDeliverySchedule() {
         const startDateInput = document.getElementById('deliveryStartDate');
         if (startDateInput && startDateInput.value) {
             url += '?start_date=' + startDateInput.value;
+            console.log('納品予定: 開始日指定 =', startDateInput.value);
+        } else {
+            console.log('納品予定: 開始日なし（今日から）');
         }
 
         const response = await fetch(url);
@@ -153,16 +157,17 @@ function applyDeliveryFilters() {
     dsFilters.seiban = (document.getElementById('dsFilterSeiban')?.value || '').toLowerCase();
     dsFilters.unit = (document.getElementById('dsFilterUnit')?.value || '').toLowerCase();
     dsFilters.supplier = (document.getElementById('dsFilterSupplier')?.value || '').toLowerCase();
+    dsFilters.date = document.getElementById('dsFilterDate')?.value || '';
     filterDeliveryRows();
 }
 
 // フィルタークリア
 function clearDeliveryFilters() {
-    ['dsFilterSeiban', 'dsFilterUnit', 'dsFilterSupplier'].forEach(id => {
+    ['dsFilterSeiban', 'dsFilterUnit', 'dsFilterSupplier', 'dsFilterDate'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
-    dsFilters = { seiban: '', unit: '', supplier: '' };
+    dsFilters = { seiban: '', unit: '', supplier: '', date: '' };
     filterDeliveryRows();
 }
 
@@ -173,11 +178,13 @@ function filterDeliveryRows() {
         const seiban = (row.dataset.seiban || '').toLowerCase();
         const unit = (row.dataset.unit || '').toLowerCase();
         const supplier = (row.dataset.supplier || '').toLowerCase();
+        const rowDate = row.dataset.date || '';
 
         const match =
             (!dsFilters.seiban || seiban.includes(dsFilters.seiban)) &&
             (!dsFilters.unit || unit.includes(dsFilters.unit)) &&
-            (!dsFilters.supplier || supplier.includes(dsFilters.supplier));
+            (!dsFilters.supplier || supplier.includes(dsFilters.supplier)) &&
+            (!dsFilters.date || rowDate === dsFilters.date);
 
         row.style.display = match ? '' : 'none';
 
@@ -187,6 +194,31 @@ function filterDeliveryRows() {
             nextRow.style.display = match ? '' : 'none';
         }
     });
+
+    // 日付フィルター時: フィルター対象外の日セクションを非表示
+    if (dsFilters.date && deliveryScheduleData) {
+        deliveryScheduleData.days.forEach(day => {
+            const daySection = document.getElementById('deliveryDay_' + day.date);
+            const dayHeader = daySection?.parentElement;
+            if (dayHeader) {
+                if (day.date === dsFilters.date) {
+                    dayHeader.style.display = '';
+                    daySection.style.display = 'block';
+                } else {
+                    dayHeader.style.display = 'none';
+                }
+            }
+        });
+    } else if (deliveryScheduleData) {
+        // 日付フィルターなし→全日セクション表示
+        deliveryScheduleData.days.forEach(day => {
+            const daySection = document.getElementById('deliveryDay_' + day.date);
+            const dayHeader = daySection?.parentElement;
+            if (dayHeader) {
+                dayHeader.style.display = '';
+            }
+        });
+    }
 }
 
 // 表示中の未受入アイテムを一括受入
@@ -284,8 +316,10 @@ function buildFilterOptions(data) {
     const seibans = new Set();
     const units = new Set();
     const suppliers = new Set();
+    const dates = [];
 
     data.days.forEach(day => {
+        dates.push({ value: day.date, label: day.display_date, isToday: day.is_today });
         day.items.forEach(item => {
             if (item.seiban) seibans.add(item.seiban);
             if (item.unit) units.add(item.unit);
@@ -293,7 +327,7 @@ function buildFilterOptions(data) {
         });
     });
 
-    return { seibans: [...seibans].sort(), units: [...units].sort(), suppliers: [...suppliers].sort() };
+    return { seibans: [...seibans].sort(), units: [...units].sort(), suppliers: [...suppliers].sort(), dates };
 }
 
 // 納品予定を描画
@@ -345,6 +379,10 @@ function renderDeliverySchedule(data) {
     // フィルターバー
     html += `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; padding:8px 12px; background:#f8f9fa; border-radius:8px;">
         <span style="font-weight:bold; font-size:0.9em;">絞り込み:</span>
+        <select id="dsFilterDate" onchange="applyDeliveryFilters()" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.88em;">
+            <option value="">全日付</option>
+            ${opts.dates.map(d => `<option value="${d.value}">${d.label}${d.isToday ? ' [今日]' : ''}</option>`).join('')}
+        </select>
         <select id="dsFilterSeiban" onchange="applyDeliveryFilters()" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.88em;">
             <option value="">全製番</option>
             ${opts.seibans.map(s => `<option value="${s}">${s}</option>`).join('')}
@@ -380,8 +418,10 @@ function renderDeliverySchedule(data) {
         </div>`;
         html += `</div>`;
 
-        // 明細テーブル（今日はデフォルト展開、他は折りたたみ）
-        const display = day.is_today ? 'block' : 'none';
+        // 明細テーブル（今日はデフォルト展開、今日がない場合は最初の日を展開）
+        const hasToday = data.days.some(d => d.is_today);
+        const isFirstDay = (data.days.indexOf(day) === 0);
+        const display = (day.is_today || (!hasToday && isFirstDay)) ? 'block' : 'none';
         html += `<div id="deliveryDay_${day.date}" style="display: ${display}; padding: 0;">`;
         html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.88em;">`;
         html += `<thead><tr style="background: #f1f3f5;">
@@ -424,7 +464,7 @@ function renderDeliverySchedule(data) {
                     ? `<span style="background: #17a2b8; color: white; padding: 1px 5px; border-radius: 3px; font-size: 0.9em;">${item.order_type}</span>`
                     : item.order_type;
 
-                html += `<tr class="ds-item-row" data-detail-id="${item.detail_id}" data-seiban="${item.seiban}" data-unit="${item.unit}" data-supplier="${item.supplier}" style="${receivedStyle} border-bottom: 1px solid #eee;">
+                html += `<tr class="ds-item-row" data-detail-id="${item.detail_id}" data-seiban="${item.seiban}" data-unit="${item.unit}" data-supplier="${item.supplier}" data-date="${day.date}" style="${receivedStyle} border-bottom: 1px solid #eee;">
                     <td style="padding: 5px 10px; text-align: center;">${btn}</td>
                     <td style="padding: 5px 10px; white-space: nowrap;">${item.seiban}</td>
                     <td style="padding: 5px 10px; font-size: 0.9em;">${item.unit}</td>
