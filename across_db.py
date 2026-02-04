@@ -4,6 +4,7 @@ V_D系ビュー（読み取り専用）への安全なアクセスを提供
 """
 
 import pyodbc
+import pandas as pd
 from decimal import Decimal
 from datetime import datetime, date
 
@@ -329,6 +330,169 @@ def merge_test_by_seiban(seiban):
         }
     except Exception as e:
         return {'success': False, 'error': str(e)}
+    finally:
+        if conn:
+            conn.close()
+
+
+def merge_from_db(seiban, order_date_from=None, order_date_to=None):
+    """
+    製番でV_D手配リストとV_D発注をマージし、save_to_database()互換のDataFrameを返す
+    Excel経由の process_excel_file_from_dataframes() を完全に置き換える
+
+    Args:
+        seiban: 製番 (例: 'MHT0620')
+        order_date_from: 発注日フィルタ開始日 (例: '2026-01-01')
+        order_date_to: 発注日フィルタ終了日 (例: '2026-12-31')
+
+    Returns:
+        pandas.DataFrame: save_to_database()に渡せる形式のDataFrame
+    """
+    seiban = seiban.strip()
+    conn = None
+    try:
+        conn, cursor = get_connection()
+
+        # 1. V_D手配リスト（BOM）を取得
+        cursor.execute("""
+            SELECT 製番, 担当者, ページNo, 行No, 部品No, 階層, 品目CD,
+                   品名, 仕様１, 仕様２, 手配区分CD, 手配区分, メーカー,
+                   材質, 員数, 必要数, 手配数, 単位, 備考, 日付
+            FROM dbo.[V_D手配リスト]
+            WHERE 製番 = ?
+        """, seiban)
+        tehai_cols = [col[0] for col in cursor.description]
+        tehai_rows = cursor.fetchall()
+
+        if not tehai_rows:
+            return None
+
+        # 2. V_D発注（発注データ）を取得 - 回答納期を含む
+        hatchu_sql = """
+            SELECT 発注番号, 製番, 品名, 仕様１, 仕様２, 手配区分CD, 手配区分,
+                   材質, 仕入先CD, 仕入先名, 仕入先略称, 発注数, 単位,
+                   発注単価, 発注金額, 発注日, 納期, 回答納期, 備考
+            FROM dbo.[V_D発注]
+            WHERE 製番 = ?
+        """
+        hatchu_params = [seiban]
+
+        # 発注日フィルタ
+        if order_date_from:
+            hatchu_sql += " AND 発注日 >= ?"
+            hatchu_params.append(order_date_from)
+        if order_date_to:
+            hatchu_sql += " AND 発注日 <= ?"
+            hatchu_params.append(order_date_to)
+
+        cursor.execute(hatchu_sql, hatchu_params)
+        hatchu_cols = [col[0] for col in cursor.description]
+        hatchu_rows = cursor.fetchall()
+
+        # 発注データを辞書リスト化
+        hatchu_list = []
+        for row in hatchu_rows:
+            rec = {}
+            for j, col in enumerate(hatchu_cols):
+                rec[col] = format_value(row[j])
+            hatchu_list.append(rec)
+
+        # 3. マージ実行 → DataFrame行リスト構築
+        merged_rows = []
+
+        for row in tehai_rows:
+            tehai_rec = {}
+            for j, col in enumerate(tehai_cols):
+                tehai_rec[col] = format_value(row[j])
+
+            # 基本カラム（手配リストから）
+            merged = {
+                '納期': '',
+                '回答納期': '',
+                '仕入先略称': '',
+                '仕入先CD': '',
+                '発注番号': '',
+                '手配数': tehai_rec.get('手配数', 0) or 0,
+                '単位': tehai_rec.get('単位', '') or '',
+                '品名': tehai_rec.get('品名', '') or '',
+                '仕様１': tehai_rec.get('仕様１', '') or '',
+                '仕様２': tehai_rec.get('仕様２', '') or '',
+                '品目CD': tehai_rec.get('品目CD', '') or '',
+                '手配区分CD': tehai_rec.get('手配区分CD', '') or '',
+                '手配区分': tehai_rec.get('手配区分', '') or '',
+                'メーカー': tehai_rec.get('メーカー', '') or '',
+                '備考': tehai_rec.get('備考', '') or '',
+                '員数': tehai_rec.get('員数', 0) or 0,
+                '必要数': tehai_rec.get('必要数', 0) or 0,
+                '製番': tehai_rec.get('製番', '') or '',
+                '材質': tehai_rec.get('材質', '') or '',
+                '部品No': tehai_rec.get('部品No', '') or '',
+                'ページNo': tehai_rec.get('ページNo', '') or '',
+                '行No': tehai_rec.get('行No', '') or '',
+                '階層': tehai_rec.get('階層', 0) or 0,
+            }
+
+            material = str(merged['材質']).strip()
+            spec1 = str(merged['仕様１']).strip()
+            order_type = str(merged['手配区分']).strip()
+
+            matched = False
+
+            # Primary match: 材質 + 仕様１ + 製番
+            if material and spec1:
+                for h in hatchu_list:
+                    h_material = str(h.get('材質', '') or '').strip()
+                    h_spec1 = str(h.get('仕様１', '') or '').strip()
+                    h_seiban = str(h.get('製番', '') or '').strip()
+                    if h_material == material and h_spec1 == spec1 and h_seiban == seiban:
+                        merged['発注番号'] = str(h.get('発注番号', '') or '')
+                        merged['仕入先略称'] = str(h.get('仕入先略称', '') or '')
+                        merged['仕入先CD'] = str(h.get('仕入先CD', '') or '')
+                        merged['納期'] = str(h.get('納期', '') or '')
+                        merged['回答納期'] = str(h.get('回答納期', '') or '')
+                        matched = True
+                        break
+
+            # Fallback match: 製番 + 仕様１ (+手配区分)
+            if not matched and spec1:
+                for h in hatchu_list:
+                    h_spec1 = str(h.get('仕様１', '') or '').strip()
+                    h_seiban = str(h.get('製番', '') or '').strip()
+                    h_type = str(h.get('手配区分', '') or '').strip()
+                    if h_seiban == seiban and h_spec1 == spec1:
+                        if order_type and h_type and order_type != h_type:
+                            continue
+                        merged['発注番号'] = str(h.get('発注番号', '') or '')
+                        merged['仕入先略称'] = str(h.get('仕入先略称', '') or '')
+                        merged['仕入先CD'] = str(h.get('仕入先CD', '') or '')
+                        merged['納期'] = str(h.get('納期', '') or '')
+                        merged['回答納期'] = str(h.get('回答納期', '') or '')
+                        matched = True
+                        break
+
+            merged_rows.append(merged)
+
+        # DataFrameに変換
+        df = pd.DataFrame(merged_rows)
+
+        # None値を空文字に
+        df = df.fillna('')
+
+        # 手配区分CDを文字列に正規化
+        df['手配区分CD'] = df['手配区分CD'].apply(
+            lambda x: str(int(float(x))) if x and x != '' else str(x)
+        )
+
+        # 発注番号あり/なしでソート
+        if '発注番号' in df.columns:
+            df_with = df[df['発注番号'] != '']
+            df_without = df[df['発注番号'] == '']
+            if not df_with.empty:
+                df_with = df_with.sort_values('発注番号')
+            df = pd.concat([df_with, df_without], ignore_index=True)
+
+        return df
+
     finally:
         if conn:
             conn.close()
