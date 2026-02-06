@@ -128,37 +128,6 @@
         
             <!-- データ処理タブ -->
             <div id="upload-tab" class="tab-content">
-                <!-- システムステータス表示 -->
-                <div id="systemStatus" class="alert alert-info" style="display: none;">
-                    <h4>📊 システムステータス</h4>
-                    <p id="statusMessage"></p>
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="statusProgress" style="width: 0%"></div>
-                    </div>
-                </div>
-
-                <!-- ネットワークファイル読み込みセクション -->
-                <div class="upload-section" style="background: #e8f4f8;">
-                    <h2>🌐 ネットワークファイル自動読み込み</h2>
-                    <p>既定のファイル: \\server3\Share-data\Document\仕入れ\002_手配リスト\手配発注_ALL.xlsx</p>
-                    <button class="btn btn-primary" onclick="loadNetworkFile()">
-                        ネットワークファイル再読込
-                    </button>
-                    <button class="btn btn-warning" onclick="refreshExcelFile()" style="margin-left: 10px;">
-                        📊 Excel更新
-                    </button>
-                    <button class="btn btn-warning" onclick="runRefreshScript()" style="margin-left: 10px;">
-                        🔄 更新スクリプト実行
-                    </button>
-                    <button class="btn btn-warning" onclick="loadFromODBC()" style="margin-left: 10px;">
-                        ODBCから直接読み込む
-                    </button>
-                    <button class="btn btn-info" onclick="debugPaths()" style="margin-left: 10px;">
-                        🔍 接続診断
-                    </button>
-                    <div id="networkFileInfo" style="margin-top: 10px;"></div>
-                </div>
-
                     <!-- 発注日フィルタ追加 -->
                     <div class="form-group" style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0;">
                         <label style="margin-bottom: 10px; display: block; cursor: pointer;">
@@ -1182,13 +1151,6 @@
                 loadOrders();
                 loadArchivedOrders();
                 setupDragDrop();
-                
-                // ネットワークファイルチェックと自動読み込み
-                checkNetworkFile();
-                loadNetworkFile();  // 自動的にシート選択を表示
-                
-                // システムステータス読み込み
-                loadSystemStatus();
                 loadHistoryData();
                 
                 // 🔥 一括削除ボタンのイベントリスナー（一度だけ登録）
@@ -1353,201 +1315,6 @@
             }
         }
 
-        // Debug paths
-        async function debugPaths() {
-            try {
-                const response = await fetch('/api/debug-paths');
-                const data = await response.json();
-                
-                let message = '📊 パス診断結果\n\n';
-                
-                // 設定されているパス
-                message += '【設定パス】\n';
-                for (const [name, path] of Object.entries(data.configured_paths)) {
-                    message += `${name}: ${path}\n`;
-                }
-                
-                message += '\n【接続状態】\n';
-                for (const [name, info] of Object.entries(data.path_checks)) {
-                    message += `${name}: ${info.os_exists ? '✅ 接続OK' : '❌ 接続失敗'}\n`;
-                    if (info.size_mb) {
-                        message += `  サイズ: ${info.size_mb} MB\n`;
-                    }
-                    if (info.error) {
-                        message += `  エラー: ${info.error}\n`;
-                    }
-                }
-                
-                message += `\n【サーバー接続】\n`;
-                message += `\\\\server3: ${data.server_connection.connected ? '✅ 接続OK' : '❌ 接続失敗'}\n`;
-                
-                console.log('Debug info:', data);
-                alert(message);
-                
-                // 詳細情報をコンソールに出力
-                console.table(data.path_checks);
-            } catch (error) {
-                alert('診断エラー: ' + error);
-            }
-        }
-
-        // Check network file availability
-        async function checkNetworkFile() {
-            try {
-                const response = await fetch('/api/check-network-file-with-diff');
-                const data = await response.json();
-                
-                const infoDiv = document.getElementById('networkFileInfo');
-                if (data.accessible) {
-                    let html = `
-                        <div class="alert alert-success">
-                            ✅ ネットワークファイル接続可能<br>
-                            ファイル: ${data.filename}<br>
-                            サイズ: ${data.size_mb} MB<br>
-                            最終更新: ${new Date(data.modified * 1000).toLocaleString('ja-JP')}<br>
-                            総件数: ${data.total_rows || 0}件 (製番: ${data.unique_seibans || 0}種類)
-                    `;
-                    
-                    if (data.diff && data.diff.length > 0) {
-                        html += `<br><br><strong>📊 更新検出:</strong><br>`;
-                        html += `<div style="max-height: 300px; overflow-y: auto; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px; background: #f8fff9;">`;
-                        
-                        data.diff.forEach(item => {
-                            let displayText = `<span style="color: #28a745; font-weight: bold;">▲ ${item.seiban}`;
-                            
-                            if (item.customer_abbr) {
-                                displayText += ` <span style="color: #6c757d;">(${item.customer_abbr})</span>`;
-                            }
-                            
-                            displayText += `:</span>`;
-                            
-                            if (item.product_name) {
-                                displayText += ` <span style="color: #495057;">${item.product_name}</span>`;
-                            }
-                            
-                            if (item.memo2) {
-                                displayText += ` <span style="color: #6c757d; font-style: italic;">${item.memo2}</span>`;
-                            }
-                            
-                            displayText += ` <span style="color: #28a745;">+${item.added}件</span> <span style="color: #6c757d;">(計${item.total}件)</span>`;
-                            
-                            html += `${displayText}<br>`;
-                        });
-                        
-                        html += `</div>`;
-                    }
-                    
-                    html += '</div>';
-                    infoDiv.innerHTML = html;
-                    
-                    loadNetworkFile();
-                } else {
-                    infoDiv.innerHTML = `
-                        <div class="alert alert-warning">
-                            ⚠️ ネットワークファイルに接続できません<br>
-                            エラー: ${data.error}<br>
-                            手動でファイルをアップロードしてください。
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                console.error('Network check error:', error);
-            }
-        }
-
-        // Load system status
-        async function loadSystemStatus() {
-            try {
-                const response = await fetch('/api/get-system-status');
-                const status = await response.json();
-                
-                if (status.last_refresh) {
-                    const statusDiv = document.getElementById('systemStatus');
-                    statusDiv.style.display = 'block';
-                    
-                    const lastRefresh = new Date(status.last_refresh);
-                    const now = new Date();
-                    const diffMinutes = Math.floor((now - lastRefresh) / 60000);
-                    
-                    document.getElementById('statusMessage').innerHTML = `
-                        最終更新: ${lastRefresh.toLocaleString('ja-JP')} (${diffMinutes}分前)<br>
-                        自動更新: ${status.auto_refresh_enabled ? '有効' : '無効'} 
-                        (間隔: ${status.refresh_interval_minutes}分)<br>
-                        ODBC: ${status.odbc_enabled ? '有効' : '無効'}
-                    `;
-                    
-                    // Update progress bar
-                    const progress = Math.min(100, (diffMinutes / status.refresh_interval_minutes) * 100);
-                    document.getElementById('statusProgress').style.width = progress + '%';
-                }
-            } catch (error) {
-                console.error('Status load error:', error);
-            }
-        }
-
-        // Load file from network
-        async function loadNetworkFile() {
-            document.getElementById('loadingIndicator').style.display = 'block';
-            
-            try {
-                const response = await fetch('/api/load-network-file', { method: 'POST' });
-                const data = await response.json();
-                
-                if (data.success) {
-                    currentFilePath = data.filepath;
-                    populateSheetSelects(data.sheet_names);
-                    document.getElementById('sheetSelection').style.display = 'block';
-                    
-                    const info = data.file_info;
-                    // 🔥 alertをトースト通知に変更（処理を中断しない）
-                    showToast(`ネットワークファイル読み込み成功！\nファイル: ${info.filename}\nサイズ: ${info.size_mb} MB`, 'success', 3000);
-                } else {
-                    if (data.suggest_upload) {
-                        if (confirm(`エラー: ${data.error}\n\n手動でファイルをアップロードしますか？`)) {
-                            document.getElementById('fileInput').click();
-                        }
-                    } else {
-                        showToast('エラー: ' + data.error, 'error');
-                    }
-                }
-            } catch (error) {
-                showToast('ネットワーク読み込みエラー: ' + error, 'error');
-            } finally {
-                document.getElementById('loadingIndicator').style.display = 'none';
-            }
-        }
-
-        // Load from ODBC
-        async function loadFromODBC() {
-            const seiban = prompt('製番を入力してください (例: MHT0123):');
-            if (!seiban) return;
-            
-            document.getElementById('loadingIndicator').style.display = 'block';
-            
-            try {
-                const response = await fetch('/api/load-from-odbc', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ seiban: seiban })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    alert(data.message);
-                    loadOrders();
-                } else {
-                    alert('ODBCエラー: ' + data.error);
-                }
-            } catch (error) {
-                alert('ODBC接続エラー: ' + error);
-            } finally {
-                document.getElementById('loadingIndicator').style.display = 'none';
-            }
-        }
-
         // Tab switching
         function switchTab(tabName) {
             document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
@@ -1563,152 +1330,6 @@
                 loadUpdateInfo();
             } else if (tabName === 'archive') {
                 loadArchivedOrders();
-            }
-        }
-
-        // batファイル起動ボタンの機能を修正
-        async function refreshExcelFile() {
-            const infoDiv = document.getElementById("networkFileInfo");
-            infoDiv.innerHTML = '<div class="spinner"></div><p>Excelファイルを更新中...</p>';
-            
-            try {
-                const response = await fetch('/api/refresh-excel', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                const data = await response.json();
-                console.log('📊 refresh-excel response:', data);  // 🔥 デバッグログ
-                
-                if (data.success) {
-                    // 🔥 少し待機してからファイル情報を取得
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    
-                    // 更新後に差分情報を取得
-                    const diffResponse = await fetch('/api/check-network-file-with-diff');
-                    const fileData = await diffResponse.json();
-                    
-                    console.log('📊 check-network-file-with-diff response:', fileData);  // 🔥 デバッグログ
-                    
-                    // 🔥 データ検証
-                    if (!fileData.accessible) {
-                        infoDiv.innerHTML = `
-                            <div class="alert alert-warning">
-                                ⚠️ ファイル情報取得エラー: ${fileData.error || '不明なエラー'}
-                            </div>
-                        `;
-                        return;
-                    }
-                    
-                    let html = `
-                        <div class="alert alert-success">
-                            ✅ ${data.message}<br>
-                            ファイル: ${fileData.filename || '不明'}<br>
-                            サイズ: ${fileData.size_mb || 0} MB<br>
-                            最終更新: ${fileData.modified ? new Date(fileData.modified * 1000).toLocaleString('ja-JP') : '不明'}<br>
-                            手配リスト総件数: ${fileData.total_seibans || 0}件
-                    `;
-                    
-                    if (fileData.diff && fileData.diff.length > 0) {
-                        html += `<br><br><strong>📊 更新検出:</strong><br>`;
-                        html += `<div style="max-height: 300px; overflow-y: auto; border: 1px solid #c3e6cb; padding: 10px; border-radius: 5px; background: #f8fff9;">`;
-                        
-                        fileData.diff.forEach(item => {
-                            let displayText = `<span style="color: #28a745; font-weight: bold;">▲ ${item.seiban}`;
-                            
-                            if (item.customer_abbr) {
-                                displayText += ` <span style="color: #6c757d;">(${item.customer_abbr})</span>`;
-                            }
-                            
-                            displayText += `:</span>`;
-                            
-                            if (item.product_name) {
-                                displayText += ` <span style="color: #495057;">${item.product_name}</span>`;
-                            }
-                            
-                            if (item.memo2) {
-                                displayText += ` <span style="color: #6c757d; font-style: italic;">${item.memo2}</span>`;
-                            }
-                            
-                            displayText += ` <span style="color: #28a745;">+${item.added}件</span> <span style="color: #6c757d;">(計${item.total}件)</span>`;
-                            
-                            html += `${displayText}<br>`;
-                        });
-                        
-                        html += `</div>`;
-                    } else {
-                        html += `<br><span style="color: #6c757d;">新規データなし</span>`;
-                    }
-                    
-                    html += '</div>';
-                    infoDiv.innerHTML = html;
-                    showToast('Excelファイルを更新しました', 'success');
-                } else {
-                    infoDiv.innerHTML = `
-                        <div class="alert alert-danger">
-                            ❌ 更新失敗: ${data.error}
-                        </div>
-                    `;
-                    showToast('更新エラー: ' + data.error, 'error');
-                }
-            } catch (error) {
-                console.error('❌ refreshExcelFile error:', error);  // 🔥 デバッグログ
-                infoDiv.innerHTML = `
-                    <div class="alert alert-danger">
-                        ❌ 通信エラー: ${error}
-                    </div>
-                `;
-                showToast('通信エラー', 'error');
-            }
-        }
-
-        // Pythonスクリプトを実行
-        async function runRefreshScript() {
-            const infoDiv = document.getElementById("networkFileInfo");
-            infoDiv.innerHTML = '<div class="spinner"></div><p>更新スクリプトを実行中...</p>';
-            
-            try {
-                const response = await fetch('/api/run-refresh-script', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    infoDiv.innerHTML = `
-                        <div class="alert alert-success">
-                            ✅ スクリプト実行成功<br>
-                            <pre style="max-height: 200px; overflow-y: auto;">${data.output}</pre>
-                        </div>
-                    `;
-                    showToast('更新スクリプト実行成功', 'success');
-                    
-                    // ネットワークファイル情報を再取得
-                    setTimeout(() => {
-                        checkNetworkFile();
-                        loadNetworkFile();
-                    }, 2000);
-                } else {
-                    infoDiv.innerHTML = `
-                        <div class="alert alert-danger">
-                            ❌ 実行失敗: ${data.error}
-                        </div>
-                    `;
-                    showToast('実行エラー: ' + data.error, 'error');
-                }
-            } catch (error) {
-                console.error(error);
-                infoDiv.innerHTML = `
-                    <div class="alert alert-danger">
-                        ❌ 通信エラー: ${error}
-                    </div>
-                `;
-                showToast('通信エラー', 'error');
             }
         }
 
@@ -2530,24 +2151,25 @@
                     }
                 }
 
-                // 🔥 製番単位でのデータ更新（マージ）
+                // 🔥 製番単位でのデータ更新（DB直接クエリ）
                 async function refreshSeiban(seiban) {
-                    if (!confirm(`製番 ${seiban} のデータを最新に更新しますか？\n\n※手配発注_ALL.xlsxから最新データをマージします`)) {
+                    if (!confirm(`製番 ${seiban} のデータを最新に更新しますか？\n\n※Across DBから直接取得してマージします（社内加工品も含む）`)) {
                         return;
                     }
 
                     // ローディング表示
                     document.getElementById('loadingIndicator').style.display = 'block';
-                    showToast(`🔄 ${seiban} を更新中...`, 'info', 10000);
+                    showToast(`🔄 ${seiban} をDB直接更新中...`, 'info', 10000);
 
                     try {
-                        const response = await fetch('/api/refresh-seiban', {
+                        const response = await fetch('/api/across-db/process', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
                             },
                             body: JSON.stringify({
-                                seiban: seiban
+                                seiban: seiban,
+                                include_mihatchu: true
                             })
                         });
 
