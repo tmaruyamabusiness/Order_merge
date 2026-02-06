@@ -2478,12 +2478,16 @@ def across_db_process():
         seiban = data.get('seiban', '').strip()
         order_date_from = data.get('order_date_from')
         order_date_to = data.get('order_date_to')
+        include_mihatchu = data.get('include_mihatchu', True)  # デフォルトでON
 
         if not seiban:
             return jsonify({'success': False, 'error': '製番を入力してください'}), 400
 
         # DB直接クエリでマージ済みDataFrameを取得
-        df_merged = across_db.merge_from_db(seiban, order_date_from, order_date_to)
+        if include_mihatchu:
+            df_merged = across_db.merge_from_db_with_mihatchu(seiban, order_date_from, order_date_to)
+        else:
+            df_merged = across_db.merge_from_db(seiban, order_date_from, order_date_to)
 
         if df_merged is None or len(df_merged) == 0:
             return jsonify({
@@ -2513,6 +2517,35 @@ def across_db_merge_test():
             return jsonify({'error': '製番を入力してください'}), 400
 
         result = across_db.merge_test_by_seiban(seiban)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/api/across-db/mihatchu')
+def across_db_mihatchu():
+    """V_D未発注から検索（社内加工品）"""
+    try:
+        seiban = request.args.get('seiban', '').strip()
+        supplier_cd = request.args.get('supplier_cd', '').strip() or None
+        order_type_cd = request.args.get('order_type_cd', '').strip() or None
+        if not seiban:
+            return jsonify({'error': '製番を入力してください'}), 400
+
+        result = across_db.search_mihatchu(seiban, supplier_cd, order_type_cd)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/api/across-db/check-updates', methods=['POST'])
+def across_db_check_updates():
+    """DB更新チェック（指定製番リスト）"""
+    try:
+        data = request.get_json() or {}
+        seibans = data.get('seibans', [])
+        if not seibans:
+            return jsonify({'error': '製番を指定してください'}), 400
+
+        result = across_db.check_db_updates(seibans)
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 400

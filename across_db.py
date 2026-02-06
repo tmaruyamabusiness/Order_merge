@@ -15,6 +15,7 @@ AVAILABLE_VIEWS = {
     'V_D発注残': '発注残データ（納入済数を含む）',
     'V_D手配リスト': '手配リスト（BOM・部品表）',
     'V_D仕入': '仕入データ（納入実績）',
+    'V_D未発注': '未発注データ（社内加工品含む）',
 }
 
 # DSN接続設定
@@ -493,6 +494,155 @@ def merge_from_db(seiban, order_date_from=None, order_date_to=None):
 
         return df
 
+    finally:
+        if conn:
+            conn.close()
+
+
+def search_mihatchu(seiban, supplier_cd=None, order_type_cd=None):
+    """
+    V_D未発注から検索（社内加工品の発注漏れ確認用）
+
+    Args:
+        seiban: 製番
+        supplier_cd: 仕入先CD (例: 'MHT')
+        order_type_cd: 手配区分CD (例: '11')
+    """
+    where_parts = ['製番 = ?']
+    params = [seiban.strip()]
+    if supplier_cd:
+        where_parts.append('仕入先CD = ?')
+        params.append(supplier_cd)
+    if order_type_cd:
+        where_parts.append('手配区分CD = ?')
+        params.append(order_type_cd)
+    return query_view('V_D未発注', ' AND '.join(where_parts), params, 500)
+
+
+def merge_from_db_with_mihatchu(seiban, order_date_from=None, order_date_to=None):
+    """
+    merge_from_db + V_D未発注の社内加工品(MHT+11)を統合
+    """
+    # 通常マージ
+    df = merge_from_db(seiban, order_date_from, order_date_to)
+
+    # V_D未発注から社内加工品を取得
+    conn = None
+    try:
+        conn, cursor = get_connection()
+        cursor.execute("""
+            SELECT 製番, 品名, 仕様１, 仕様２, 手配区分CD, 手配区分, メーカー,
+                   材質, 仕入先CD, 仕入先略称, 発注数, 単位, 納期, 備考,
+                   ページNo, 行No, 階層
+            FROM dbo.[V_D未発注]
+            WHERE 製番 = ? AND 仕入先CD = 'MHT' AND 手配区分CD = '11'
+        """, seiban.strip())
+        mihatchu_cols = [col[0] for col in cursor.description]
+        mihatchu_rows = cursor.fetchall()
+
+        if not mihatchu_rows:
+            return df
+
+        # 未発注データをDataFrame行に変換
+        mihatchu_merged = []
+        for row in mihatchu_rows:
+            rec = {}
+            for j, col in enumerate(mihatchu_cols):
+                rec[col] = format_value(row[j])
+
+            merged = {
+                '納期': str(rec.get('納期', '') or ''),
+                '回答納期': '',
+                '仕入先略称': str(rec.get('仕入先略称', '') or ''),
+                '仕入先CD': str(rec.get('仕入先CD', '') or ''),
+                '発注番号': '',  # 未発注なので空
+                '手配数': rec.get('発注数', 0) or 0,
+                '単位': str(rec.get('単位', '') or ''),
+                '品名': str(rec.get('品名', '') or ''),
+                '仕様１': str(rec.get('仕様１', '') or ''),
+                '仕様２': str(rec.get('仕様２', '') or ''),
+                '品目CD': '',
+                '手配区分CD': str(rec.get('手配区分CD', '') or ''),
+                '手配区分': str(rec.get('手配区分', '') or ''),
+                'メーカー': str(rec.get('メーカー', '') or ''),
+                '備考': str(rec.get('備考', '') or ''),
+                '員数': 0,
+                '必要数': 0,
+                '製番': seiban.strip(),
+                '材質': str(rec.get('材質', '') or ''),
+                '部品No': '',
+                'ページNo': str(rec.get('ページNo', '') or ''),
+                '行No': str(rec.get('行No', '') or ''),
+                '階層': rec.get('階層', 0) or 0,
+            }
+            mihatchu_merged.append(merged)
+
+        if not mihatchu_merged:
+            return df
+
+        df_mihatchu = pd.DataFrame(mihatchu_merged).fillna('')
+
+        # 既にマージ済みdfに含まれている仕様１は除外（重複防止）
+        if df is not None and not df.empty:
+            existing_specs = set(df['仕様１'].astype(str).str.strip())
+            df_mihatchu = df_mihatchu[~df_mihatchu['仕様１'].astype(str).str.strip().isin(existing_specs)]
+
+        if df_mihatchu.empty:
+            return df
+
+        if df is not None and not df.empty:
+            df = pd.concat([df, df_mihatchu], ignore_index=True)
+        else:
+            df = df_mihatchu
+
+        return df
+
+    finally:
+        if conn:
+            conn.close()
+
+
+def check_db_updates(seibans):
+    """
+    指定製番リストについてDBの最新件数と更新状況をチェック
+
+    Args:
+        seibans: 製番リスト
+
+    Returns:
+        dict: { seiban: { tehai_count, hatchu_count, mihatchu_count, has_new } }
+    """
+    conn = None
+    try:
+        conn, cursor = get_connection()
+        results = {}
+
+        for seiban in seibans:
+            s = seiban.strip()
+            # 手配リスト件数
+            cursor.execute("SELECT COUNT(*) FROM dbo.[V_D手配リスト] WHERE 製番 = ?", s)
+            tehai_count = cursor.fetchone()[0]
+
+            # 発注データ件数
+            cursor.execute("SELECT COUNT(*) FROM dbo.[V_D発注] WHERE 製番 = ?", s)
+            hatchu_count = cursor.fetchone()[0]
+
+            # 未発注件数（社内加工品）
+            cursor.execute("""
+                SELECT COUNT(*) FROM dbo.[V_D未発注]
+                WHERE 製番 = ? AND 仕入先CD = 'MHT' AND 手配区分CD = '11'
+            """, s)
+            mihatchu_count = cursor.fetchone()[0]
+
+            results[s] = {
+                'tehai_count': tehai_count,
+                'hatchu_count': hatchu_count,
+                'mihatchu_count': mihatchu_count,
+            }
+
+        return {'success': True, 'results': results}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
     finally:
         if conn:
             conn.close()

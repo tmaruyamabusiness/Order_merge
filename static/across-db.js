@@ -35,7 +35,7 @@ function onAcrossViewChange() {
         searchType.innerHTML += '<option value="発注番号">発注番号</option>';
         searchType.innerHTML += '<option value="製番">製番</option>';
         searchInput.placeholder = '例: 89074 または MHT0620';
-    } else if (view === 'V_D手配リスト') {
+    } else if (view === 'V_D手配リスト' || view === 'V_D未発注') {
         searchType.innerHTML += '<option value="製番">製番</option>';
         searchInput.placeholder = '例: MHT0620';
     }
@@ -366,6 +366,159 @@ function renderMergeResult(data, container) {
     container.innerHTML = html;
 }
 
+// ========== 未発注検索 (社内加工品) ==========
+async function searchMihatchu() {
+    const seiban = document.getElementById('acrossMihatchuSeiban').value.trim();
+    if (!seiban) return;
+
+    const resultDiv = document.getElementById('acrossMihatchuResult');
+    resultDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">検索中...</div>';
+
+    const params = new URLSearchParams({
+        seiban: seiban,
+        supplier_cd: 'MHT',
+        order_type_cd: '11'
+    });
+
+    try {
+        const res = await fetch('/api/across-db/mihatchu?' + params.toString());
+        const data = await res.json();
+
+        if (data.error) {
+            resultDiv.innerHTML = '<div class="alert alert-danger">' + escapeForTable(data.error) + '</div>';
+            return;
+        }
+
+        if (!data.rows || data.rows.length === 0) {
+            resultDiv.innerHTML = '<div class="alert alert-info">社内加工品(MHT+11)の未発注はありません</div>';
+            return;
+        }
+
+        // 結果表示
+        let html = '<div style="margin-bottom:8px;">';
+        html += '<strong style="color:#9c27b0;">' + data.count + '件</strong> の社内加工品（未発注）があります';
+        html += '</div>';
+
+        renderAcrossResult(data, resultDiv);
+        resultDiv.insertAdjacentHTML('afterbegin', html);
+
+    } catch (e) {
+        resultDiv.innerHTML = '<div class="alert alert-danger">検索失敗: ' + e + '</div>';
+    }
+}
+
+// ========== DB更新チェック ==========
+async function checkDbUpdates() {
+    const resultDiv = document.getElementById('dbUpdateCheckResult');
+    resultDiv.innerHTML = '<div style="padding:10px; color:#666;">更新確認中...</div>';
+
+    // 現在登録済みの製番リストを取得
+    let seibans = [];
+    const seibanSet = new Set();
+    document.querySelectorAll('.seiban-cb').forEach(cb => {
+        const s = cb.value.trim();
+        if (s && !seibanSet.has(s)) {
+            seibanSet.add(s);
+            seibans.push(s);
+        }
+    });
+
+    if (seibans.length === 0) {
+        resultDiv.innerHTML = '<div class="alert alert-warning">製番リストが空です</div>';
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/across-db/check-updates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ seibans: seibans })
+        });
+        const data = await res.json();
+
+        if (data.error) {
+            resultDiv.innerHTML = '<div class="alert alert-danger">' + escapeForTable(data.error) + '</div>';
+            return;
+        }
+
+        if (!data.success || !data.results) {
+            resultDiv.innerHTML = '<div class="alert alert-danger">更新チェック失敗</div>';
+            return;
+        }
+
+        renderDbUpdateResult(data.results, resultDiv);
+
+    } catch (e) {
+        resultDiv.innerHTML = '<div class="alert alert-danger">更新チェック失敗: ' + e + '</div>';
+    }
+}
+
+function renderDbUpdateResult(results, container) {
+    let html = '<div style="margin-bottom:8px;"><strong>DB更新状況</strong></div>';
+
+    html += '<div style="overflow-x:auto; max-height:300px; overflow-y:auto; border:1px solid #ddd; border-radius:5px;">';
+    html += '<table style="width:100%; border-collapse:collapse; font-size:0.85em;">';
+    html += '<thead><tr style="background:#e0e0e0; position:sticky; top:0;">';
+    html += '<th style="padding:6px 10px; border:1px solid #ddd;">製番</th>';
+    html += '<th style="padding:6px 10px; border:1px solid #ddd;">手配リスト</th>';
+    html += '<th style="padding:6px 10px; border:1px solid #ddd;">発注</th>';
+    html += '<th style="padding:6px 10px; border:1px solid #ddd; background:#f3e5f5;">社内加工(未発注)</th>';
+    html += '</tr></thead><tbody>';
+
+    let totalMihatchu = 0;
+    for (const seiban of Object.keys(results).sort()) {
+        const r = results[seiban];
+        const hasMihatchu = r.mihatchu_count > 0;
+        totalMihatchu += r.mihatchu_count;
+
+        const rowBg = hasMihatchu ? '#fce4ec' : '#fff';
+        html += '<tr style="background:' + rowBg + ';">';
+        html += '<td style="padding:4px 8px; border:1px solid #eee; font-weight:bold;">' + escapeForTable(seiban) + '</td>';
+        html += '<td style="padding:4px 8px; border:1px solid #eee; text-align:right;">' + r.tehai_count + '</td>';
+        html += '<td style="padding:4px 8px; border:1px solid #eee; text-align:right;">' + r.hatchu_count + '</td>';
+        html += '<td style="padding:4px 8px; border:1px solid #eee; text-align:right;' + (hasMihatchu ? ' color:#c2185b; font-weight:bold;' : '') + '">' + r.mihatchu_count + '</td>';
+        html += '</tr>';
+    }
+    html += '</tbody></table></div>';
+
+    // 通知バッジ
+    if (totalMihatchu > 0) {
+        html += '<div class="alert alert-warning" style="margin-top:10px;">';
+        html += '<strong>⚠️ ' + totalMihatchu + '件</strong> の社内加工品（未発注）があります。DB直接処理で取り込み可能です。';
+        html += '</div>';
+        updateMihatchuBadge(totalMihatchu);
+    } else {
+        html += '<div class="alert alert-success" style="margin-top:10px;">';
+        html += '✓ 社内加工品の未発注はありません';
+        html += '</div>';
+        updateMihatchuBadge(0);
+    }
+
+    container.innerHTML = html;
+}
+
+function updateMihatchuBadge(count) {
+    const badge = document.getElementById('mihatchuBadge');
+    if (badge) {
+        if (count > 0) {
+            badge.textContent = count;
+            badge.style.display = 'inline-block';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+}
+
+// 自動更新チェック（ページ読み込み時）
+function autoCheckDbUpdates() {
+    setTimeout(() => {
+        const resultDiv = document.getElementById('dbUpdateCheckResult');
+        if (resultDiv && document.querySelectorAll('.seiban-cb').length > 0) {
+            checkDbUpdates();
+        }
+    }, 2000);
+}
+
 // ========== Enter キー対応 ==========
 document.addEventListener('DOMContentLoaded', function() {
     const searchInput = document.getElementById('acrossSearchInput');
@@ -386,4 +539,13 @@ document.addEventListener('DOMContentLoaded', function() {
             if (e.key === 'Enter') executeMergeTest();
         });
     }
+    const mihatchuInput = document.getElementById('acrossMihatchuSeiban');
+    if (mihatchuInput) {
+        mihatchuInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') searchMihatchu();
+        });
+    }
+
+    // 自動更新チェック
+    autoCheckDbUpdates();
 });
