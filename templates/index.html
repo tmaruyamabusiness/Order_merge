@@ -333,6 +333,22 @@
                             <div id="acrossMihatchuResult" style="margin-top: 10px;"></div>
                         </div>
 
+                        <!-- 在庫部品検索 (手配区分CD=15) -->
+                        <div style="background: #e3f2fd; padding: 12px; border-radius: 6px; margin-bottom: 15px; border-left: 4px solid #2196f3;">
+                            <h3 style="margin-top:0; font-size:1em;">📦 在庫部品リスト</h3>
+                            <p style="color:#888; font-size:0.85em; margin:0 0 8px;">手配区分CD='15'（在庫部品）を抽出 - 在庫から集めて仕分けが必要な部品</p>
+                            <button class="btn" style="background:#2196f3; color:#fff;" onclick="searchZaikoBuhin()">在庫部品を検索</button>
+                            <div id="zaikoBuhinResult" style="margin-top: 10px;"></div>
+                        </div>
+
+                        <!-- 0ZAIKO 手配リスト -->
+                        <div style="background: #fff3e0; padding: 12px; border-radius: 6px; margin-bottom: 15px; border-left: 4px solid #ff9800;">
+                            <h3 style="margin-top:0; font-size:1em;">🏷️ 0ZAIKO 在庫発注リスト</h3>
+                            <p style="color:#888; font-size:0.85em; margin:0 0 8px;">製番='0ZAIKO'（在庫品発注用）の手配リストを表示 - 在庫補充用の発注データ</p>
+                            <button class="btn" style="background:#ff9800; color:#fff;" onclick="search0ZaikoTehai()">0ZAIKO手配を検索</button>
+                            <div id="zaikoTehaiResult" style="margin-top: 10px;"></div>
+                        </div>
+
                         <!-- ビュー自由検索 -->
                         <div style="background: #fff; padding: 12px; border-radius: 6px;">
                             <h3 style="margin-top:0; font-size:1em;">📋 ビュー自由検索</h3>

@@ -648,6 +648,104 @@ def check_db_updates(seibans):
             conn.close()
 
 
+def search_zaiko_buhin(seibans=None):
+    """
+    在庫部品（手配区分CD='15'）を検索
+    在庫から集めて仕分けが必要な部品を抽出
+
+    Args:
+        seibans: 製番リスト（指定時はその製番のみ、None時は全製番）
+
+    Returns:
+        dict: { columns, rows, count, by_seiban }
+    """
+    conn = None
+    try:
+        conn, cursor = get_connection()
+
+        if seibans and len(seibans) > 0:
+            placeholders = ','.join(['?' for _ in seibans])
+            cursor.execute(f"""
+                SELECT 製番, 手配数, 品名, 仕様１, 仕様２, 手配区分, 備考, 材質, 日付
+                FROM dbo.[V_D手配リスト]
+                WHERE 手配区分CD = '15' AND 製番 IN ({placeholders})
+                ORDER BY 製番, 品名
+            """, seibans)
+        else:
+            cursor.execute("""
+                SELECT 製番, 手配数, 品名, 仕様１, 仕様２, 手配区分, 備考, 材質, 日付
+                FROM dbo.[V_D手配リスト]
+                WHERE 手配区分CD = '15'
+                ORDER BY 製番, 品名
+            """)
+
+        columns = [col[0] for col in cursor.description]
+        raw_rows = cursor.fetchall()
+
+        rows = []
+        by_seiban = {}
+        for row in raw_rows:
+            formatted = [format_value(v) for v in row]
+            rows.append(formatted)
+            seiban = formatted[0] or ''
+            if seiban not in by_seiban:
+                by_seiban[seiban] = []
+            by_seiban[seiban].append(formatted)
+
+        return {
+            'success': True,
+            'columns': columns,
+            'rows': rows,
+            'count': len(rows),
+            'by_seiban': by_seiban,
+            'seiban_count': len(by_seiban)
+        }
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+    finally:
+        if conn:
+            conn.close()
+
+
+def search_0zaiko_tehai():
+    """
+    0ZAIKO（在庫品発注用製番）の手配リストを検索
+    在庫補充用に発注された部品を表示
+
+    Returns:
+        dict: { columns, rows, count }
+    """
+    conn = None
+    try:
+        conn, cursor = get_connection()
+
+        cursor.execute("""
+            SELECT 製番, 手配数, 品名, 仕様１, 仕様２, 手配区分, 備考, メーカー, 材質, 日付
+            FROM dbo.[V_D手配リスト]
+            WHERE 製番 = '0ZAIKO'
+            ORDER BY 日付 DESC, 品名
+        """)
+
+        columns = [col[0] for col in cursor.description]
+        raw_rows = cursor.fetchall()
+
+        rows = []
+        for row in raw_rows:
+            rows.append([format_value(v) for v in row])
+
+        return {
+            'success': True,
+            'columns': columns,
+            'rows': rows,
+            'count': len(rows)
+        }
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+    finally:
+        if conn:
+            conn.close()
+
+
 def test_connection():
     """接続テスト"""
     conn = None
