@@ -53,6 +53,13 @@ except ImportError:
     app.config['SECRET_KEY'] = 'your-secret-key-here-change-in-production'
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///order_management.db'
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    # コネクションプール設定（枯渇エラー対策）
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_size': 10,
+        'max_overflow': 20,
+        'pool_pre_ping': True,
+        'pool_recycle': 300,  # 5分で接続をリサイクル
+    }
     app.config['UPLOAD_FOLDER'] = 'uploads'
     app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size for large Excel files
     
@@ -66,6 +73,11 @@ except ImportError:
     app.config['ODBC_CONNECTION_STRING'] = ''  # ODBC接続文字列（必要に応じて設定）
 
 db = SQLAlchemy(app)
+
+# リクエスト後のDBセッションクリーンアップ（コネクションプール枯渇対策）
+@app.teardown_appcontext
+def shutdown_session(exception=None):
+    db.session.remove()
 
 # Ensure upload directory exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
