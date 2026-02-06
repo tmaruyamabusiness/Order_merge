@@ -519,6 +519,159 @@ function autoCheckDbUpdates() {
     }, 2000);
 }
 
+// ========== 在庫部品検索 (手配区分CD=15) ==========
+async function searchZaikoBuhin() {
+    const resultDiv = document.getElementById('zaikoBuhinResult');
+    resultDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">在庫部品を検索中...</div>';
+
+    // 現在登録済みの製番リストを取得
+    let seibans = [];
+    const seibanSet = new Set();
+    document.querySelectorAll('.seiban-cb').forEach(cb => {
+        const s = cb.value.trim();
+        if (s && !seibanSet.has(s)) {
+            seibanSet.add(s);
+            seibans.push(s);
+        }
+    });
+
+    try {
+        const res = await fetch('/api/across-db/zaiko-buhin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ seibans: seibans.length > 0 ? seibans : null })
+        });
+        const data = await res.json();
+
+        if (data.error) {
+            resultDiv.innerHTML = '<div class="alert alert-danger">' + escapeForTable(data.error) + '</div>';
+            return;
+        }
+
+        if (!data.success) {
+            resultDiv.innerHTML = '<div class="alert alert-danger">検索失敗</div>';
+            return;
+        }
+
+        renderZaikoBuhinResult(data, resultDiv);
+
+    } catch (e) {
+        resultDiv.innerHTML = '<div class="alert alert-danger">検索失敗: ' + e + '</div>';
+    }
+}
+
+function renderZaikoBuhinResult(data, container) {
+    if (!data.rows || data.rows.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">在庫部品（手配区分CD=15）はありません</div>';
+        return;
+    }
+
+    let html = '<div style="margin-bottom:10px;">';
+    html += '<strong style="color:#2196f3;">' + data.count + '件</strong> の在庫部品があります';
+    html += ' (<strong>' + data.seiban_count + '</strong> 製番)';
+    html += '</div>';
+
+    // 製番ごとにグループ表示
+    const bySeiban = data.by_seiban || {};
+    const columns = data.columns;
+
+    for (const seiban of Object.keys(bySeiban).sort()) {
+        const items = bySeiban[seiban];
+        html += '<div style="margin-bottom:15px; border:1px solid #90caf9; border-radius:6px; overflow:hidden;">';
+        html += '<div style="background:#e3f2fd; padding:8px 12px; font-weight:bold;">';
+        html += '製番: ' + escapeForTable(seiban) + ' (' + items.length + '件)';
+        html += '</div>';
+
+        html += '<table style="width:100%; border-collapse:collapse; font-size:0.85em;">';
+        html += '<thead><tr style="background:#f5f5f5;">';
+        // columns[0]は製番なのでスキップ
+        for (let i = 1; i < columns.length; i++) {
+            html += '<th style="padding:6px 8px; border:1px solid #ddd; text-align:left;">' + escapeForTable(columns[i]) + '</th>';
+        }
+        html += '</tr></thead><tbody>';
+
+        for (const row of items) {
+            html += '<tr>';
+            for (let i = 1; i < row.length; i++) {
+                const val = row[i];
+                const display = (val === null || val === '') ? '-' : escapeForTable(String(val));
+                html += '<td style="padding:4px 8px; border:1px solid #eee;">' + display + '</td>';
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table></div>';
+    }
+
+    container.innerHTML = html;
+}
+
+// ========== 0ZAIKO 手配リスト検索 ==========
+async function search0ZaikoTehai() {
+    const resultDiv = document.getElementById('zaikoTehaiResult');
+    resultDiv.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">0ZAIKO手配リストを検索中...</div>';
+
+    try {
+        const res = await fetch('/api/across-db/0zaiko');
+        const data = await res.json();
+
+        if (data.error) {
+            resultDiv.innerHTML = '<div class="alert alert-danger">' + escapeForTable(data.error) + '</div>';
+            return;
+        }
+
+        if (!data.success) {
+            resultDiv.innerHTML = '<div class="alert alert-danger">検索失敗</div>';
+            return;
+        }
+
+        render0ZaikoResult(data, resultDiv);
+
+    } catch (e) {
+        resultDiv.innerHTML = '<div class="alert alert-danger">検索失敗: ' + e + '</div>';
+    }
+}
+
+function render0ZaikoResult(data, container) {
+    if (!data.rows || data.rows.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">0ZAIKO（在庫発注用製番）の手配データはありません</div>';
+        return;
+    }
+
+    let html = '<div style="margin-bottom:10px;">';
+    html += '<strong style="color:#ff9800;">' + data.count + '件</strong> の在庫発注データがあります';
+    html += '</div>';
+
+    html += '<div style="overflow-x:auto; max-height:400px; overflow-y:auto; border:1px solid #ddd; border-radius:5px;">';
+    html += '<table style="width:100%; border-collapse:collapse; font-size:0.85em; white-space:nowrap;">';
+
+    // ヘッダー
+    html += '<thead><tr style="background:#fff3e0; position:sticky; top:0;">';
+    html += '<th style="padding:6px 8px; border:1px solid #ddd; background:#ffe0b2;">#</th>';
+    for (const col of data.columns) {
+        if (col === '製番') continue; // 0ZAIKOは固定なのでスキップ
+        html += '<th style="padding:6px 8px; border:1px solid #ddd; background:#ffe0b2;">' + escapeForTable(col) + '</th>';
+    }
+    html += '</tr></thead><tbody>';
+
+    // データ
+    for (let i = 0; i < data.rows.length; i++) {
+        const row = data.rows[i];
+        const bgColor = i % 2 === 0 ? '#fff' : '#fff8e1';
+        html += '<tr style="background:' + bgColor + ';">';
+        html += '<td style="padding:4px 8px; border:1px solid #eee; color:#999; text-align:center;">' + (i + 1) + '</td>';
+        for (let j = 0; j < row.length; j++) {
+            if (data.columns[j] === '製番') continue;
+            const val = row[j];
+            const display = (val === null || val === '') ? '-' : escapeForTable(String(val));
+            html += '<td style="padding:4px 8px; border:1px solid #eee;">' + display + '</td>';
+        }
+        html += '</tr>';
+    }
+    html += '</tbody></table></div>';
+
+    container.innerHTML = html;
+}
+
 // ========== Enter キー対応 ==========
 document.addEventListener('DOMContentLoaded', function() {
     const searchInput = document.getElementById('acrossSearchInput');

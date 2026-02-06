@@ -2559,6 +2559,26 @@ def across_db_check_updates():
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
+@app.route('/api/across-db/zaiko-buhin', methods=['POST'])
+def across_db_zaiko_buhin():
+    """在庫部品（手配区分CD=15）を検索"""
+    try:
+        data = request.get_json() or {}
+        seibans = data.get('seibans', None)
+        result = across_db.search_zaiko_buhin(seibans)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/api/across-db/0zaiko')
+def across_db_0zaiko():
+    """0ZAIKO（在庫品発注用製番）の手配リストを検索"""
+    try:
+        result = across_db.search_0zaiko_tehai()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
 @app.route('/api/get-system-status')
 def get_system_status():
     """Get system status including cache and refresh info"""
