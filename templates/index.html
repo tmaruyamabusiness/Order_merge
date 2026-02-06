@@ -2176,7 +2176,8 @@
                         const result = await response.json();
 
                         if (result.success) {
-                            showToast(`✅ ${seiban} を更新しました（${result.message}）`, 'success');
+                            // 変更内容を詳細に表示
+                            showRefreshFeedback(seiban, result);
                             // 受注リストを再読み込み
                             await loadOrders();
                         } else {
@@ -2187,6 +2188,85 @@
                     } finally {
                         document.getElementById('loadingIndicator').style.display = 'none';
                     }
+                }
+
+                // 更新フィードバック表示
+                function showRefreshFeedback(seiban, result) {
+                    const changes = result.changes || {};
+                    let feedbackHtml = `<div style="text-align:left; max-width:400px;">`;
+                    feedbackHtml += `<strong>✅ ${seiban} 更新完了</strong><br>`;
+                    feedbackHtml += `<div style="margin:8px 0; padding:8px; background:#f5f5f5; border-radius:4px;">`;
+                    feedbackHtml += `合計: ${result.total_items || 0}件<br>`;
+                    feedbackHtml += `ユニット数: ${changes.total_after || 0}`;
+                    if (changes.total_before !== changes.total_after) {
+                        const diff = (changes.total_after || 0) - (changes.total_before || 0);
+                        feedbackHtml += ` <span style="color:${diff > 0 ? '#28a745' : '#dc3545'};">(${diff > 0 ? '+' : ''}${diff})</span>`;
+                    }
+                    feedbackHtml += `</div>`;
+
+                    // 新規追加されたユニット
+                    if (changes.added_units && changes.added_units.length > 0) {
+                        feedbackHtml += `<div style="margin:8px 0; padding:8px; background:#d4edda; border-radius:4px; border-left:4px solid #28a745;">`;
+                        feedbackHtml += `<strong style="color:#155724;">🆕 新規ユニット (${changes.added_units.length}件)</strong><br>`;
+                        changes.added_units.forEach(u => {
+                            feedbackHtml += `<span style="color:#155724;">+ ${u.unit} (${u.detail_count}件)</span><br>`;
+                        });
+                        feedbackHtml += `</div>`;
+                    }
+
+                    // 更新されたユニット
+                    if (changes.updated_units && changes.updated_units.length > 0) {
+                        feedbackHtml += `<div style="margin:8px 0; padding:8px; background:#fff3cd; border-radius:4px; border-left:4px solid #ffc107;">`;
+                        feedbackHtml += `<strong style="color:#856404;">🔄 更新ユニット (${changes.updated_units.length}件)</strong><br>`;
+                        changes.updated_units.forEach(u => {
+                            const diffSign = u.diff > 0 ? '+' : '';
+                            feedbackHtml += `<span style="color:#856404;">${u.unit}: ${u.before_count} → ${u.after_count} (${diffSign}${u.diff})</span><br>`;
+                        });
+                        feedbackHtml += `</div>`;
+                    }
+
+                    // 変更なし
+                    if ((!changes.added_units || changes.added_units.length === 0) &&
+                        (!changes.updated_units || changes.updated_units.length === 0)) {
+                        feedbackHtml += `<div style="margin:8px 0; padding:8px; background:#e2e3e5; border-radius:4px;">`;
+                        feedbackHtml += `<span style="color:#383d41;">変更なし（${changes.unchanged_units ? changes.unchanged_units.length : 0}ユニット）</span>`;
+                        feedbackHtml += `</div>`;
+                    }
+
+                    feedbackHtml += `</div>`;
+
+                    // モーダルで表示
+                    showFeedbackModal(feedbackHtml);
+                }
+
+                // フィードバックモーダル表示
+                function showFeedbackModal(content) {
+                    // 既存のモーダルがあれば削除
+                    const existingModal = document.getElementById('feedbackModal');
+                    if (existingModal) existingModal.remove();
+
+                    const modal = document.createElement('div');
+                    modal.id = 'feedbackModal';
+                    modal.style.cssText = `
+                        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                        background: rgba(0,0,0,0.5); display: flex; align-items: center;
+                        justify-content: center; z-index: 10000;
+                    `;
+                    modal.innerHTML = `
+                        <div style="background: white; padding: 20px; border-radius: 10px; max-width: 500px; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+                            ${content}
+                            <div style="text-align: center; margin-top: 15px;">
+                                <button onclick="document.getElementById('feedbackModal').remove()"
+                                    style="padding: 8px 24px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 1em;">
+                                    OK
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                    modal.addEventListener('click', (e) => {
+                        if (e.target === modal) modal.remove();
+                    });
+                    document.body.appendChild(modal);
                 }
 
                 // 🏷 ラベル生成・ダウンロード
