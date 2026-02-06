@@ -115,6 +115,15 @@
                 <div class="form-group">
                     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                         <input type="text" id="searchInput" placeholder="製番・ユニット名・客先名・ステータスで検索..." onkeyup="filterOrders()" style="flex:1; min-width:200px;">
+                        <!-- ソート・グループ化オプション -->
+                        <select id="sortOrder" onchange="loadOrders()" style="padding:6px 10px; border:1px solid #ced4da; border-radius:4px; font-size:0.9em;">
+                            <option value="desc">製番 大→小</option>
+                            <option value="asc">製番 小→大</option>
+                        </select>
+                        <label style="display:flex; align-items:center; gap:4px; font-size:0.85em; white-space:nowrap; cursor:pointer;">
+                            <input type="checkbox" id="groupDerivatives" onchange="loadOrders()" checked style="width:16px; height:16px;">
+                            枝番グループ化
+                        </label>
                         <div class="view-toggle-bar" style="margin-bottom:0;">
                             <button class="btn btn-sm active" id="btnCardView" onclick="setViewMode('card')" title="カード表示">&#9638; カード</button>
                             <button class="btn btn-sm" id="btnTableView" onclick="setViewMode('table')" title="テーブル表示">&#9776; テーブル</button>
@@ -1876,6 +1885,25 @@
             loadOrders();
         }
 
+        // 製番から親製番を抽出（枝番を除去）
+        function getParentSeiban(seiban) {
+            // MHT0620-001 → MHT0620, 620-008 → 620
+            const match = seiban.match(/^(.+?)-\d+$/);
+            return match ? match[1] : null;
+        }
+
+        // 製番のソート用比較関数（数値部分を正しく比較）
+        function compareSeibanNumeric(a, b, desc = true) {
+            // 数字部分を抽出して比較
+            const numA = parseInt((a.match(/\d+/) || ['0'])[0], 10);
+            const numB = parseInt((b.match(/\d+/) || ['0'])[0], 10);
+            if (numA !== numB) {
+                return desc ? numB - numA : numA - numB;
+            }
+            // 数字が同じなら文字列全体で比較
+            return desc ? b.localeCompare(a) : a.localeCompare(b);
+        }
+
         async function loadOrders() {
             try {
                 const response = await fetch('/api/orders');
@@ -1891,6 +1919,10 @@
                     return;
                 }
 
+                // ソート順を取得
+                const sortOrder = document.getElementById('sortOrder')?.value || 'desc';
+                const groupDerivatives = document.getElementById('groupDerivatives')?.checked ?? true;
+
                 // 製番でグループ化
                 const groupedBySeiban = {};
                 orders.forEach(order => {
@@ -1898,16 +1930,44 @@
                         groupedBySeiban[order.seiban] = {
                             seiban: order.seiban,
                             product_name: order.product_name,
-                            customer_abbr: order.customer_abbr, 
+                            customer_abbr: order.customer_abbr,
                             memo2: order.memo2,
-                            units: []
+                            units: [],
+                            isDerivative: false,
+                            parentSeiban: null,
+                            derivatives: []
                         };
                     }
                     groupedBySeiban[order.seiban].units.push(order);
                 });
-                
-                // 製番でソート
-                const sortedSeibans = Object.keys(groupedBySeiban).sort();
+
+                // 枝番グループ化が有効な場合、親子関係を構築
+                if (groupDerivatives) {
+                    const seibans = Object.keys(groupedBySeiban);
+                    seibans.forEach(seiban => {
+                        const parent = getParentSeiban(seiban);
+                        if (parent && groupedBySeiban[parent]) {
+                            // 親が存在する場合、派生として登録
+                            groupedBySeiban[seiban].isDerivative = true;
+                            groupedBySeiban[seiban].parentSeiban = parent;
+                            groupedBySeiban[parent].derivatives.push(seiban);
+                        }
+                    });
+                }
+
+                // 製番でソート（派生を除く親のみ、または全て）
+                const isDescending = sortOrder === 'desc';
+                let sortedSeibans;
+                if (groupDerivatives) {
+                    // 親製番のみをソートし、派生は親の下に表示
+                    sortedSeibans = Object.keys(groupedBySeiban)
+                        .filter(s => !groupedBySeiban[s].isDerivative)
+                        .sort((a, b) => compareSeibanNumeric(a, b, isDescending));
+                } else {
+                    // 全製番をフラットにソート
+                    sortedSeibans = Object.keys(groupedBySeiban)
+                        .sort((a, b) => compareSeibanNumeric(a, b, isDescending));
+                }
                 
                 // orderGrid要素を取得
                 const orderGrid = document.getElementById('orderGrid');
@@ -2053,6 +2113,159 @@
                         `;
                         tableBody.appendChild(tr);
                     });
+
+                    // 派生製番（枝番）を親の下に表示
+                    if (groupDerivatives && group.derivatives && group.derivatives.length > 0) {
+                        // 派生をソート
+                        const sortedDerivatives = group.derivatives.sort((a, b) => compareSeibanNumeric(a, b, isDescending));
+
+                        sortedDerivatives.forEach(derivativeSeiban => {
+                            const derivativeGroup = groupedBySeiban[derivativeSeiban];
+                            if (!derivativeGroup) return;
+
+                            // 派生カードを作成（インデント付き）
+                            const derivativeCard = document.createElement('div');
+                            derivativeCard.className = 'seiban-group derivative-seiban';
+                            derivativeCard.style.marginLeft = '30px';
+                            derivativeCard.style.borderLeft = '3px solid #6c757d';
+                            derivativeCard.style.backgroundColor = '#f8f9fa';
+
+                            // 派生グループの統計を計算
+                            const derivTotalDetails = derivativeGroup.units.reduce((sum, unit) => sum + unit.detail_count, 0);
+                            const derivTotalReceived = derivativeGroup.units.reduce((sum, unit) => sum + unit.received_count, 0);
+                            const derivHasInternal = derivativeGroup.units.some(unit => unit.has_internal_processing);
+
+                            // 派生のステータスを決定
+                            const derivAllCompleted = derivativeGroup.units.every(unit => unit.status === '納品完了');
+                            const derivAnyInProgress = derivativeGroup.units.some(unit => unit.status === '納品中');
+                            const derivStatus = derivAllCompleted ? '納品完了' : (derivAnyInProgress ? '納品中' : '受入準備前');
+
+                            derivativeCard.innerHTML = `
+                                <div class="seiban-header">
+                                    <input type="checkbox" class="seiban-checkbox" value="${derivativeSeiban}"
+                                    data-order-ids="${derivativeGroup.units.map(u => u.id).join(',')}"
+                                    style="margin-right: 10px;">
+                                    <div onclick="toggleSeibanGroup('${derivativeSeiban}')" style="flex: 1; cursor: pointer;">
+                                        <div class="seiban-info">
+                                            <span class="seiban-toggle" id="toggle-${derivativeSeiban}">📁</span>
+                                            <span class="seiban-title" style="color: #6c757d;">↳ ${derivativeSeiban}${derivativeGroup.customer_abbr ? '（' + derivativeGroup.customer_abbr + '）' : ''}</span>
+                                            <span class="seiban-product-name">${derivativeGroup.product_name || ''}${derivativeGroup.memo2 ? '　' + derivativeGroup.memo2 : ''}</span>
+                                            <span class="order-status status-${derivStatus}">${derivStatus}</span>
+                                        </div>
+                                        <div class="seiban-summary">
+                                            <span class="unit-count">${derivativeGroup.units.length} ユニット</span>
+                                            <span class="progress-text">${derivTotalReceived}/${derivTotalDetails} 完了</span>
+                                            ${derivHasInternal ? '<span class="internal-processing-warning">⚠️ 追加工有</span>' : ''}
+                                        </div>
+                                        <div class="progress-bar">
+                                            <div class="progress-fill" style="width: ${derivTotalDetails > 0 ? (derivTotalReceived/derivTotalDetails)*100 : 0}%"></div>
+                                        </div>
+                                        <div class="seiban-actions" style="display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding-left: 15px; margin-top: 5px;">
+                                            <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); exportSeiban('${derivativeSeiban}')" title="製番全体をExcel出力" style="font-size: 0.85em; padding: 4px 8px;">
+                                                📄 Excel出力
+                                            </button>
+                                            <button class="btn btn-success btn-sm" onclick="event.stopPropagation(); refreshSeiban('${derivativeSeiban}')" title="この製番のデータを最新に更新" style="font-size: 0.85em; padding: 4px 8px;">
+                                                🔄 更新
+                                            </button>
+                                            <button class="btn btn-warning btn-sm" onclick="event.stopPropagation(); generateLabels('${derivativeSeiban}')" title="ラベル印刷用Excel出力" style="font-size: 0.85em; padding: 4px 8px;">
+                                                🏷 ラベル
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="unit-list" id="units-${derivativeSeiban}" style="display: none;">
+                                </div>
+                                <table class="unit-table" id="table-${derivativeSeiban}" style="display:none;">
+                                    <thead>
+                                        <tr>
+                                            <th>ユニット</th>
+                                            <th>ステータス</th>
+                                            <th>進捗</th>
+                                            <th>場所</th>
+                                            <th>備考</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            `;
+
+                            orderGrid.appendChild(derivativeCard);
+
+                            // 派生のユニットを追加
+                            const derivUnitList = derivativeCard.querySelector(`#units-${derivativeSeiban}`);
+                            const derivTableBody = derivativeCard.querySelector(`#table-${derivativeSeiban} tbody`);
+
+                            derivativeGroup.units.forEach(order => {
+                                // Card view
+                                const unitCard = document.createElement('div');
+                                unitCard.className = `unit-card status-${order.status}`;
+                                unitCard.setAttribute('data-unit', (order.unit || '').toLowerCase());
+                                unitCard.setAttribute('data-status', (order.status || '').toLowerCase());
+                                unitCard.setAttribute('data-order-id', order.id);
+                                unitCard.onclick = () => showOrderDetails(order.id);
+
+                                const isCompleted = order.status === '納品完了';
+
+                                unitCard.innerHTML = `
+                                    <div class="unit-header">
+                                        <span class="unit-name">ユニット：${order.unit || 'ユニット名無し'}</span>
+                                        <span class="order-status status-${order.status}">${order.status}</span>
+                                    </div>
+                                    <div class="unit-details">
+                                        <p><strong>📍 場所:</strong> ${order.location}</p>
+                                        <p><strong>📊 進捗:</strong> ${order.received_count}/${order.detail_count} 完了</p>
+                                        ${order.has_internal_processing ?
+                                            '<p><span class="internal-processing-warning" style="display: inline-block; margin-top: 5px;">⚠️ 追加工有</span></p>' : ''
+                                        }
+                                        ${order.created_at ?
+                                            `<p><strong>📅 シート作成日:</strong> ${order.created_at}</p>` : ''
+                                        }
+                                        ${order.updated_at ?
+                                            `<p><strong>✒️ シート内容更新日:</strong> ${order.updated_at}</p>` : ''
+                                        }
+                                    </div>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: ${order.detail_count > 0 ? (order.received_count/order.detail_count)*100 : 0}%"></div>
+                                    </div>
+                                    <div class="unit-actions" style="margin-top: 5px; padding-top: 15px; border-top: 1px solid #e9ecef;">
+                                        <button class="btn btn-primary" onclick="event.stopPropagation(); exportOrder(${order.id})">📄 Excel出力</button>
+                                        ${isCompleted ?
+                                            `<button class="btn btn-success" onclick="event.stopPropagation(); archiveOrder(${order.id})">📦 アーカイブへ</button>` :
+                                            `<button class="btn btn-danger" onclick="event.stopPropagation(); deleteOrder(${order.id})">🗑️ 削除</button>`
+                                        }
+                                    </div>
+                                `;
+
+                                derivUnitList.appendChild(unitCard);
+
+                                // Table view row
+                                const pct = order.detail_count > 0 ? (order.received_count/order.detail_count)*100 : 0;
+                                const tr = document.createElement('tr');
+                                tr.setAttribute('data-unit', (order.unit || '').toLowerCase());
+                                tr.setAttribute('data-status', (order.status || '').toLowerCase());
+                                tr.setAttribute('data-order-id', order.id);
+                                tr.onclick = () => showOrderDetails(order.id);
+                                tr.innerHTML = `
+                                    <td><strong>${order.unit || 'ユニット名無し'}</strong></td>
+                                    <td><span class="order-status status-${order.status}" style="font-size:0.85em;padding:2px 8px;">${order.status}</span></td>
+                                    <td>${order.received_count}/${order.detail_count}
+                                        <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+                                    </td>
+                                    <td>${order.location || '未定'}</td>
+                                    <td>${order.has_internal_processing ? '⚠️追加工' : ''}</td>
+                                    <td>
+                                        <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); exportOrder(${order.id})" style="font-size:0.8em;padding:2px 6px;">📄</button>
+                                        ${isCompleted ?
+                                            `<button class="btn btn-success btn-sm" onclick="event.stopPropagation(); archiveOrder(${order.id})" style="font-size:0.8em;padding:2px 6px;">📦</button>` :
+                                            `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteOrder(${order.id})" style="font-size:0.8em;padding:2px 6px;">🗑️</button>`
+                                        }
+                                    </td>
+                                `;
+                                derivTableBody.appendChild(tr);
+                            });
+                        });
+                    }
                 });
 
                 // ガントチャートは表示中の場合のみ更新
