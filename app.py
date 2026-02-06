@@ -2472,7 +2472,7 @@ def across_db_order_detail():
 
 @app.route('/api/across-db/process', methods=['POST'])
 def across_db_process():
-    """DB直接クエリでマージ→DB保存（Excel不要）"""
+    """DB直接クエリでマージ→DB保存（Excel不要）- 変更内容をフィードバック"""
     try:
         data = request.json
         seiban = data.get('seiban', '').strip()
@@ -2482,6 +2482,18 @@ def across_db_process():
 
         if not seiban:
             return jsonify({'success': False, 'error': '製番を入力してください'}), 400
+
+        # 更新前の状態を取得
+        before_orders = Order.query.filter_by(seiban=seiban, is_archived=False).all()
+        before_units = {}
+        for order in before_orders:
+            unit_name = order.unit or ''
+            detail_count = OrderDetail.query.filter_by(order_id=order.id).count()
+            before_units[unit_name] = {
+                'order_id': order.id,
+                'detail_count': detail_count,
+                'status': order.status
+            }
 
         # DB直接クエリでマージ済みDataFrameを取得
         if include_mihatchu:
@@ -2498,9 +2510,61 @@ def across_db_process():
         # 既存のsave_to_database()でDB保存
         save_to_database(df_merged, seiban)
 
+        # 更新後の状態を取得
+        after_orders = Order.query.filter_by(seiban=seiban, is_archived=False).all()
+        after_units = {}
+        for order in after_orders:
+            unit_name = order.unit or ''
+            detail_count = OrderDetail.query.filter_by(order_id=order.id).count()
+            after_units[unit_name] = {
+                'order_id': order.id,
+                'detail_count': detail_count,
+                'status': order.status
+            }
+
+        # 変更内容を分析
+        changes = {
+            'added_units': [],
+            'updated_units': [],
+            'unchanged_units': [],
+            'total_before': len(before_units),
+            'total_after': len(after_units)
+        }
+
+        for unit_name, after_info in after_units.items():
+            if unit_name not in before_units:
+                # 新規追加されたユニット
+                changes['added_units'].append({
+                    'unit': unit_name or '(名称なし)',
+                    'detail_count': after_info['detail_count']
+                })
+            else:
+                before_info = before_units[unit_name]
+                if after_info['detail_count'] != before_info['detail_count']:
+                    # 内容が更新されたユニット
+                    diff = after_info['detail_count'] - before_info['detail_count']
+                    changes['updated_units'].append({
+                        'unit': unit_name or '(名称なし)',
+                        'before_count': before_info['detail_count'],
+                        'after_count': after_info['detail_count'],
+                        'diff': diff
+                    })
+                else:
+                    changes['unchanged_units'].append(unit_name or '(名称なし)')
+
+        # メッセージ生成
+        msg_parts = [f'{seiban} の更新完了']
+        if changes['added_units']:
+            msg_parts.append(f"新規ユニット: {len(changes['added_units'])}件")
+        if changes['updated_units']:
+            msg_parts.append(f"更新ユニット: {len(changes['updated_units'])}件")
+        msg_parts.append(f"合計: {len(df_merged)}件")
+
         return jsonify({
             'success': True,
-            'message': f'{seiban} の処理が完了しました（{len(df_merged)}件 - DB直接取得）'
+            'message': ' / '.join(msg_parts),
+            'changes': changes,
+            'total_items': len(df_merged)
         })
 
     except Exception as e:
