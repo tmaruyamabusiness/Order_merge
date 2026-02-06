@@ -1622,18 +1622,8 @@ def _setup_print_settings(ws, row_idx, order, unit_display, customer, memo):
     ws.sheet_view.view = 'pageBreakPreview'
     
 # Excelファイル更新用の関数を追加
-# 🔥 更新対象のExcelファイル一覧
+# 🔥 更新対象のExcelファイル一覧（DB直接クエリに移行中）
 EXCEL_FILES_TO_REFRESH = [
-    {
-        'path': r"\\SERVER3\Share-data\Document\仕入れ\002_手配リスト\手配発注_ALL.xlsx",
-        'name': '手配発注_ALL',
-        'sheet': '手配リスト_ALL'
-    },
-    {
-        'path': r"\\SERVER3\Share-data\Document\仕入れ\002_手配リスト\DV_仕入.xlsx",
-        'name': 'DV_仕入',
-        'sheet': '仕入_価格確認用'
-    },
     {
         'path': r"\\SERVER3\share-data\Document\Acrossデータ\製番一覧表.xlsx",
         'name': '製番一覧表',
@@ -5393,15 +5383,7 @@ if __name__ == '__main__':
     # 設定を取得
     config_obj = get_config()
 
-    # 🔥 起動時に発注_ALLキャッシュをバックグラウンドでプリロード
-    def _preload_cache():
-        try:
-            with app.app_context():
-                load_order_all_cache()
-                print("✅ 発注_ALLキャッシュのプリロード完了")
-        except Exception as e:
-            print(f"⚠️ プリロード失敗（初回検索時に再試行します）: {e}")
-    Thread(target=_preload_cache, daemon=True).start()
+    # キャッシュプリロードは不要（DB直接クエリを使用）
 
     # SSL/TLSコンテキストを取得
     ssl_context = None

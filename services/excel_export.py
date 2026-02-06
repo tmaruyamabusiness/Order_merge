@@ -15,13 +15,8 @@ from openpyxl.worksheet.page import PageMargins
 from app import db, Order, OrderDetail
 from utils import Constants, DataUtils, MekkiUtils, ExcelStyler, generate_qr_code, create_gantt_chart_sheet, DeliveryUtils
 
-# 更新対象のExcelファイル一覧
+# 更新対象のExcelファイル一覧（DB直接クエリに移行中）
 EXCEL_FILES_TO_REFRESH = [
-    {
-        'path': r"\\SERVER3\Share-data\Document\仕入れ\002_手配リスト\DV_仕入.xlsx",
-        'name': 'DV_仕入',
-        'sheet': '仕入_価格確認用'
-    },
     {
         'path': r"\\SERVER3\share-data\Document\Acrossデータ\製番一覧表.xlsx",
         'name': '製番一覧表',
