@@ -12,7 +12,14 @@ class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
     SQLALCHEMY_DATABASE_URI = 'sqlite:///order_management.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    
+    # コネクションプール設定（枯渇エラー対策）
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_size': 10,
+        'max_overflow': 20,
+        'pool_pre_ping': True,
+        'pool_recycle': 300,  # 5分で接続をリサイクル
+    }
+
     # ファイルアップロード設定
     UPLOAD_FOLDER = 'uploads'
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
