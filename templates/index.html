@@ -25,6 +25,37 @@
             <p>Excel処理・入荷管理・ステータス追跡</p>
         </div>
 
+        <!-- DB更新通知バー -->
+        <div id="dbUpdateBar" style="display:none; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:white; padding:10px 20px; border-radius:8px; margin-bottom:15px; box-shadow:0 2px 10px rgba(102,126,234,0.3);">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span id="dbUpdateIcon" style="font-size:1.4em;">🔔</span>
+                    <span id="dbUpdateMessage" style="font-weight:500;"></span>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <span id="dbUpdateTime" style="font-size:0.85em; opacity:0.9;"></span>
+                    <button onclick="checkDbUpdates()" class="btn btn-sm" style="background:rgba(255,255,255,0.2); border:1px solid rgba(255,255,255,0.4); color:white; padding:4px 12px;">
+                        🔄 再チェック
+                    </button>
+                    <button onclick="dismissDbUpdate()" class="btn btn-sm" style="background:transparent; border:none; color:white; opacity:0.8; padding:4px 8px;">
+                        ✕
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- DB状態インジケーター（常時表示） -->
+        <div id="dbStatusIndicator" style="display:flex; justify-content:flex-end; align-items:center; gap:15px; margin-bottom:10px; font-size:0.85em; color:#6c757d;">
+            <div>
+                <span>手配: </span><span id="dbTehaiCount">-</span>件
+                <span style="margin-left:10px;">発注: </span><span id="dbHacchuCount">-</span>件
+            </div>
+            <div id="dbLastCheck">最終確認: -</div>
+            <button onclick="checkDbUpdates()" class="btn btn-sm" style="padding:2px 10px; font-size:0.85em;" title="DB更新チェック">
+                🔍 更新確認
+            </button>
+        </div>
+
         <div class="nav-tabs">
             <button class="nav-tab active" onclick="switchTab('orders')">📋 受注リスト</button>
             <button class="nav-tab" onclick="switchTab('upload')">📤 データ処理</button>
@@ -1154,6 +1185,119 @@
                 }
             });
 
+            // ========================================
+            // DB更新検知・通知システム
+            // ========================================
+            let dbUpdateCheckInterval = null;
+            const DB_CHECK_INTERVAL = 5 * 60 * 1000; // 5分ごと
+
+            async function checkDbUpdates() {
+                try {
+                    const response = await fetch('/api/across-db/check-updates');
+                    const result = await response.json();
+
+                    if (!result.success) {
+                        console.error('DB更新チェックエラー:', result.error);
+                        return;
+                    }
+
+                    // 状態表示を更新
+                    updateDbStatusDisplay(result.current_snapshot);
+
+                    // 更新がある場合は通知バーを表示
+                    if (result.has_updates) {
+                        showDbUpdateNotification(result);
+                    }
+
+                    // 初回チェックの場合
+                    if (result.is_first_check) {
+                        console.log('DB更新検知: ベースライン設定完了');
+                    }
+
+                    return result;
+                } catch (error) {
+                    console.error('DB更新チェック失敗:', error);
+                }
+            }
+
+            function updateDbStatusDisplay(snapshot) {
+                if (!snapshot) return;
+
+                document.getElementById('dbTehaiCount').textContent = snapshot.tehai_count?.toLocaleString() || '-';
+                document.getElementById('dbHacchuCount').textContent = snapshot.hacchu_count?.toLocaleString() || '-';
+
+                const now = new Date();
+                document.getElementById('dbLastCheck').textContent =
+                    `最終確認: ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
+            }
+
+            function showDbUpdateNotification(result) {
+                const bar = document.getElementById('dbUpdateBar');
+                const messageEl = document.getElementById('dbUpdateMessage');
+                const timeEl = document.getElementById('dbUpdateTime');
+                const iconEl = document.getElementById('dbUpdateIcon');
+
+                // メッセージ構築
+                let messages = [];
+                if (result.tehai_changes?.new_seibans?.length > 0) {
+                    messages.push(`新規製番: ${result.tehai_changes.new_seibans.slice(0, 3).join(', ')}${result.tehai_changes.new_seibans.length > 3 ? ' 他' : ''}`);
+                }
+                if (result.tehai_changes?.count_diff > 0) {
+                    messages.push(`手配 +${result.tehai_changes.count_diff}件`);
+                }
+                if (result.hacchu_changes?.count_diff > 0) {
+                    messages.push(`発注 +${result.hacchu_changes.count_diff}件`);
+                }
+
+                messageEl.textContent = messages.join(' / ') || result.message;
+                timeEl.textContent = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+                iconEl.textContent = '🔔';
+
+                bar.style.display = 'block';
+
+                // ブラウザ通知（許可されている場合）
+                if (Notification.permission === 'granted') {
+                    new Notification('DB更新検知', {
+                        body: messages.join(' / ') || result.message,
+                        icon: '/static/favicon.ico'
+                    });
+                }
+
+                // 効果音（オプション）
+                // playNotificationSound();
+            }
+
+            function dismissDbUpdate() {
+                document.getElementById('dbUpdateBar').style.display = 'none';
+            }
+
+            function startDbUpdateCheck() {
+                // 初回チェック
+                checkDbUpdates();
+
+                // 定期チェック開始
+                if (dbUpdateCheckInterval) {
+                    clearInterval(dbUpdateCheckInterval);
+                }
+                dbUpdateCheckInterval = setInterval(checkDbUpdates, DB_CHECK_INTERVAL);
+                console.log(`DB更新チェック開始（${DB_CHECK_INTERVAL / 1000}秒間隔）`);
+            }
+
+            function stopDbUpdateCheck() {
+                if (dbUpdateCheckInterval) {
+                    clearInterval(dbUpdateCheckInterval);
+                    dbUpdateCheckInterval = null;
+                    console.log('DB更新チェック停止');
+                }
+            }
+
+            // ブラウザ通知の許可リクエスト
+            function requestNotificationPermission() {
+                if ('Notification' in window && Notification.permission === 'default') {
+                    Notification.requestPermission();
+                }
+            }
+
             // ページ読み込み時に統計を表示
             document.addEventListener('DOMContentLoaded', function() {
                 // 初期データ読み込み
@@ -1161,6 +1305,10 @@
                 loadArchivedOrders();
                 setupDragDrop();
                 loadHistoryData();
+
+                // DB更新検知開始
+                startDbUpdateCheck();
+                requestNotificationPermission();
                 
                 // 🔥 一括削除ボタンのイベントリスナー（一度だけ登録）
                 document.getElementById('deleteMultipleBtn').addEventListener('click', async () => {

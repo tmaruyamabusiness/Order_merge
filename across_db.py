@@ -758,3 +758,257 @@ def test_connection():
     finally:
         if conn:
             conn.close()
+
+
+# ========================================
+# DB更新検知機能
+# ========================================
+
+# 前回のスナップショット保存用
+_db_snapshot = {
+    'tehai': {'count': 0, 'seibans': set()},
+    'hacchu': {'count': 0, 'latest_numbers': set()},
+    'last_check': None
+}
+
+
+def get_db_status():
+    """
+    DBの現在の状態を取得（更新検知用）
+
+    Returns:
+        dict: {
+            'tehai': {'count': int, 'seibans': set, 'new_seibans': list},
+            'hacchu': {'count': int, 'new_count': int},
+            'timestamp': datetime
+        }
+    """
+    conn = None
+    try:
+        conn, cursor = get_connection()
+
+        # 手配リストの製番一覧と件数を取得
+        cursor.execute("""
+            SELECT 製番, COUNT(*) as cnt
+            FROM dbo.[V_D手配リスト]
+            GROUP BY 製番
+        """)
+        tehai_rows = cursor.fetchall()
+        tehai_seibans = {row[0].strip() if row[0] else '' for row in tehai_rows}
+        tehai_count = sum(row[1] for row in tehai_rows)
+
+        # 発注リストの件数を取得
+        cursor.execute("SELECT COUNT(*) FROM dbo.[V_D発注]")
+        hacchu_count = cursor.fetchone()[0]
+
+        # 最新の発注番号（直近100件）を取得
+        cursor.execute("""
+            SELECT TOP 100 発注番号
+            FROM dbo.[V_D発注]
+            ORDER BY 発注番号 DESC
+        """)
+        hacchu_rows = cursor.fetchall()
+        latest_hacchu = {str(row[0]).strip() if row[0] else '' for row in hacchu_rows}
+
+        return {
+            'success': True,
+            'tehai': {
+                'count': tehai_count,
+                'seibans': tehai_seibans,
+                'seiban_count': len(tehai_seibans)
+            },
+            'hacchu': {
+                'count': hacchu_count,
+                'latest_numbers': latest_hacchu
+            },
+            'timestamp': datetime.now()
+        }
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+    finally:
+        if conn:
+            conn.close()
+
+
+def check_db_updates(stored_snapshot=None):
+    """
+    DBの更新をチェック
+
+    Args:
+        stored_snapshot: 前回のスナップショット（Noneの場合は内部キャッシュを使用）
+
+    Returns:
+        dict: {
+            'has_updates': bool,
+            'tehai_changes': {'new_seibans': [...], 'count_diff': int},
+            'hacchu_changes': {'new_orders': [...], 'count_diff': int},
+            'current_snapshot': {...},
+            'message': str
+        }
+    """
+    global _db_snapshot
+
+    # 現在の状態を取得
+    current = get_db_status()
+    if not current.get('success'):
+        return {
+            'success': False,
+            'has_updates': False,
+            'error': current.get('error', '接続エラー')
+        }
+
+    # 比較対象のスナップショット
+    if stored_snapshot:
+        prev = stored_snapshot
+    else:
+        prev = _db_snapshot
+
+    # 初回チェックの場合
+    if prev['last_check'] is None:
+        _db_snapshot = {
+            'tehai': {
+                'count': current['tehai']['count'],
+                'seibans': current['tehai']['seibans']
+            },
+            'hacchu': {
+                'count': current['hacchu']['count'],
+                'latest_numbers': current['hacchu']['latest_numbers']
+            },
+            'last_check': current['timestamp']
+        }
+        return {
+            'success': True,
+            'has_updates': False,
+            'is_first_check': True,
+            'tehai_changes': {'new_seibans': [], 'count_diff': 0},
+            'hacchu_changes': {'new_orders': [], 'count_diff': 0},
+            'message': '初回チェック完了（ベースライン設定）',
+            'current_snapshot': {
+                'tehai_count': current['tehai']['count'],
+                'tehai_seiban_count': current['tehai']['seiban_count'],
+                'hacchu_count': current['hacchu']['count'],
+                'timestamp': current['timestamp'].isoformat()
+            }
+        }
+
+    # 変更を検出
+    has_updates = False
+    messages = []
+
+    # 手配リストの変更検出
+    prev_seibans = prev['tehai'].get('seibans', set())
+    curr_seibans = current['tehai']['seibans']
+    new_seibans = list(curr_seibans - prev_seibans)
+    tehai_count_diff = current['tehai']['count'] - prev['tehai'].get('count', 0)
+
+    if new_seibans:
+        has_updates = True
+        messages.append(f"新規製番: {', '.join(sorted(new_seibans)[:5])}")
+        if len(new_seibans) > 5:
+            messages[-1] += f" 他{len(new_seibans)-5}件"
+
+    if tehai_count_diff > 0:
+        has_updates = True
+        messages.append(f"手配リスト: +{tehai_count_diff}件")
+    elif tehai_count_diff < 0:
+        messages.append(f"手配リスト: {tehai_count_diff}件")
+
+    # 発注リストの変更検出
+    prev_hacchu = prev['hacchu'].get('latest_numbers', set())
+    curr_hacchu = current['hacchu']['latest_numbers']
+    new_orders = list(curr_hacchu - prev_hacchu)
+    hacchu_count_diff = current['hacchu']['count'] - prev['hacchu'].get('count', 0)
+
+    if hacchu_count_diff > 0:
+        has_updates = True
+        messages.append(f"発注リスト: +{hacchu_count_diff}件")
+    elif hacchu_count_diff < 0:
+        messages.append(f"発注リスト: {hacchu_count_diff}件")
+
+    # スナップショット更新
+    _db_snapshot = {
+        'tehai': {
+            'count': current['tehai']['count'],
+            'seibans': current['tehai']['seibans']
+        },
+        'hacchu': {
+            'count': current['hacchu']['count'],
+            'latest_numbers': current['hacchu']['latest_numbers']
+        },
+        'last_check': current['timestamp']
+    }
+
+    return {
+        'success': True,
+        'has_updates': has_updates,
+        'is_first_check': False,
+        'tehai_changes': {
+            'new_seibans': sorted(new_seibans),
+            'count_diff': tehai_count_diff
+        },
+        'hacchu_changes': {
+            'new_orders': sorted(new_orders)[:20],  # 最大20件
+            'count_diff': hacchu_count_diff
+        },
+        'message': ' / '.join(messages) if messages else '変更なし',
+        'current_snapshot': {
+            'tehai_count': current['tehai']['count'],
+            'tehai_seiban_count': current['tehai']['seiban_count'],
+            'hacchu_count': current['hacchu']['count'],
+            'timestamp': current['timestamp'].isoformat()
+        }
+    }
+
+
+def get_seiban_updates(seiban):
+    """
+    特定製番の手配・発注の更新状況を取得
+
+    Args:
+        seiban: 製番
+
+    Returns:
+        dict: {'tehai_count': int, 'hacchu_count': int, 'mihatchu_count': int}
+    """
+    conn = None
+    try:
+        conn, cursor = get_connection()
+
+        result = {'seiban': seiban}
+
+        # 手配リスト件数
+        cursor.execute(
+            "SELECT COUNT(*) FROM dbo.[V_D手配リスト] WHERE 製番 = ?",
+            [seiban]
+        )
+        result['tehai_count'] = cursor.fetchone()[0]
+
+        # 発注件数
+        cursor.execute(
+            "SELECT COUNT(*) FROM dbo.[V_D発注] WHERE 製番 = ?",
+            [seiban]
+        )
+        result['hacchu_count'] = cursor.fetchone()[0]
+
+        # 未発注件数
+        cursor.execute(
+            "SELECT COUNT(*) FROM dbo.[V_D未発注] WHERE 製番 = ?",
+            [seiban]
+        )
+        result['mihatchu_count'] = cursor.fetchone()[0]
+
+        # 発注残件数
+        cursor.execute(
+            "SELECT COUNT(*) FROM dbo.[V_D発注残] WHERE 製番 = ?",
+            [seiban]
+        )
+        result['hacchuzan_count'] = cursor.fetchone()[0]
+
+        result['success'] = True
+        return result
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+    finally:
+        if conn:
+            conn.close()
+
