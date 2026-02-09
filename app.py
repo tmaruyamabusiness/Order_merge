@@ -2427,6 +2427,50 @@ def across_db_test():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
 
+
+@app.route('/api/across-db/check-updates')
+def across_db_check_updates():
+    """DB更新チェック（手配・発注リストの変更検知）"""
+    try:
+        result = across_db.check_db_updates()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/across-db/status')
+def across_db_status():
+    """DB現在状態取得"""
+    try:
+        result = across_db.get_db_status()
+        if result.get('success'):
+            # setはJSON化できないので変換
+            return jsonify({
+                'success': True,
+                'tehai': {
+                    'count': result['tehai']['count'],
+                    'seiban_count': result['tehai']['seiban_count']
+                },
+                'hacchu': {
+                    'count': result['hacchu']['count']
+                },
+                'timestamp': result['timestamp'].isoformat()
+            })
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/across-db/seiban-status/<seiban>')
+def across_db_seiban_status(seiban):
+    """製番別の手配・発注状況取得"""
+    try:
+        result = across_db.get_seiban_updates(seiban)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
 @app.route('/api/across-db/columns')
 def across_db_columns():
     """ビューのカラム一覧取得"""
