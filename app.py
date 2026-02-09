@@ -2263,15 +2263,6 @@ def index():
     """Main page"""
     # Start auto refresh on first load
     start_auto_refresh()
-    
-    # デバッグ: 設定されているパスを確認
-    print("=" * 50)
-    print("設定されているパス:")
-    print(f"DEFAULT_EXCEL_PATH: {app.config['DEFAULT_EXCEL_PATH']}")
-    print(f"HISTORY_EXCEL_PATH: {app.config['HISTORY_EXCEL_PATH']}")
-    print(f"SEIBAN_LIST_PATH: {app.config.get('SEIBAN_LIST_PATH', 'Not set')}")
-    print("=" * 50)
-    
     return render_template('index.html')
 
 @app.route('/api/debug-paths')
