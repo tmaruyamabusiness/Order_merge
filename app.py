@@ -2655,20 +2655,6 @@ def across_db_mihatchu():
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
-@app.route('/api/across-db/check-updates', methods=['POST'])
-def across_db_check_updates():
-    """DB更新チェック（指定製番リスト）"""
-    try:
-        data = request.get_json() or {}
-        seibans = data.get('seibans', [])
-        if not seibans:
-            return jsonify({'error': '製番を指定してください'}), 400
-
-        result = across_db.check_db_updates(seibans)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
-
 @app.route('/api/across-db/zaiko-buhin', methods=['POST'])
 def across_db_zaiko_buhin():
     """在庫部品（手配区分CD=15）を検索"""
@@ -3588,7 +3574,7 @@ def receive_page(seiban, unit=''):
             const checkChar = barcode.charAt(8);
 
             // 8桁が全て数字かチェック
-            if (!/^\d{{8}}$/.test(digits)) {{
+            if (!/^\\d{{8}}$/.test(digits)) {{
                 return {{ valid: false, error: '数字部分に不正な文字が含まれています', orderNumber: null }};
             }}
 
