@@ -34,6 +34,9 @@
                 </div>
                 <div style="display:flex; gap:8px; align-items:center;">
                     <span id="dbUpdateTime" style="font-size:0.85em; opacity:0.9;"></span>
+                    <button onclick="toggleDbUpdateDetails()" class="btn btn-sm" style="background:rgba(255,255,255,0.2); border:1px solid rgba(255,255,255,0.4); color:white; padding:4px 12px;">
+                        📋 詳細
+                    </button>
                     <button onclick="checkDbUpdates()" class="btn btn-sm" style="background:rgba(255,255,255,0.2); border:1px solid rgba(255,255,255,0.4); color:white; padding:4px 12px;">
                         🔄 再チェック
                     </button>
@@ -41,6 +44,21 @@
                         ✕
                     </button>
                 </div>
+            </div>
+            <!-- 詳細表示エリア -->
+            <div id="dbUpdateDetails" style="display:none; margin-top:10px; background:rgba(255,255,255,0.15); border-radius:6px; padding:10px; max-height:300px; overflow-y:auto;">
+                <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
+                    <thead>
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.3);">
+                            <th style="text-align:left; padding:5px;">製番</th>
+                            <th style="text-align:left; padding:5px;">品名</th>
+                            <th style="text-align:left; padding:5px;">仕様１</th>
+                            <th style="text-align:right; padding:5px;">数量</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dbUpdateDetailsBody">
+                    </tbody>
+                </table>
             </div>
         </div>
 
@@ -1236,6 +1254,7 @@
                 const messageEl = document.getElementById('dbUpdateMessage');
                 const timeEl = document.getElementById('dbUpdateTime');
                 const iconEl = document.getElementById('dbUpdateIcon');
+                const detailsBody = document.getElementById('dbUpdateDetailsBody');
 
                 // メッセージ構築
                 let messages = [];
@@ -1253,22 +1272,50 @@
                 timeEl.textContent = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
                 iconEl.textContent = '🔔';
 
+                // 詳細テーブルを構築
+                detailsBody.innerHTML = '';
+                const details = result.hacchu_changes?.new_order_details || [];
+                if (details.length > 0) {
+                    details.forEach(item => {
+                        const tr = document.createElement('tr');
+                        tr.style.borderBottom = '1px solid rgba(255,255,255,0.1)';
+                        tr.innerHTML = `
+                            <td style="padding:5px;">${item['製番'] || '-'}</td>
+                            <td style="padding:5px;">${item['品名'] || '-'}</td>
+                            <td style="padding:5px;">${item['仕様１'] || '-'}</td>
+                            <td style="padding:5px; text-align:right;">${item['発注数'] || '-'} ${item['単位'] || ''}</td>
+                        `;
+                        detailsBody.appendChild(tr);
+                    });
+                } else {
+                    detailsBody.innerHTML = '<tr><td colspan="4" style="padding:10px; text-align:center; opacity:0.7;">詳細情報なし</td></tr>';
+                }
+
                 bar.style.display = 'block';
 
                 // ブラウザ通知（許可されている場合）
                 if (Notification.permission === 'granted') {
+                    let notifyBody = messages.join(' / ') || result.message;
+                    if (details.length > 0) {
+                        const firstItem = details[0];
+                        notifyBody += `\n${firstItem['製番']} ${firstItem['品名']}`;
+                        if (details.length > 1) notifyBody += ` 他${details.length - 1}件`;
+                    }
                     new Notification('DB更新検知', {
-                        body: messages.join(' / ') || result.message,
+                        body: notifyBody,
                         icon: '/static/favicon.ico'
                     });
                 }
+            }
 
-                // 効果音（オプション）
-                // playNotificationSound();
+            function toggleDbUpdateDetails() {
+                const details = document.getElementById('dbUpdateDetails');
+                details.style.display = details.style.display === 'none' ? 'block' : 'none';
             }
 
             function dismissDbUpdate() {
                 document.getElementById('dbUpdateBar').style.display = 'none';
+                document.getElementById('dbUpdateDetails').style.display = 'none';
             }
 
             function startDbUpdateCheck() {

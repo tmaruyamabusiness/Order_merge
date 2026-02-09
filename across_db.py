@@ -919,6 +919,11 @@ def check_db_updates(stored_snapshot=None):
     new_orders = list(curr_hacchu - prev_hacchu)
     hacchu_count_diff = current['hacchu']['count'] - prev['hacchu'].get('count', 0)
 
+    # 新規発注の詳細を取得
+    new_order_details = []
+    if new_orders and len(new_orders) <= 50:  # 50件以下なら詳細取得
+        new_order_details = get_new_order_details(new_orders[:20])
+
     if hacchu_count_diff > 0:
         has_updates = True
         messages.append(f"発注リスト: +{hacchu_count_diff}件")
@@ -948,6 +953,7 @@ def check_db_updates(stored_snapshot=None):
         },
         'hacchu_changes': {
             'new_orders': sorted(new_orders)[:20],  # 最大20件
+            'new_order_details': new_order_details,  # 詳細情報
             'count_diff': hacchu_count_diff
         },
         'message': ' / '.join(messages) if messages else '変更なし',
@@ -958,6 +964,58 @@ def check_db_updates(stored_snapshot=None):
             'timestamp': current['timestamp'].isoformat()
         }
     }
+
+
+def get_new_order_details(order_numbers):
+    """
+    発注番号リストから発注詳細を取得
+
+    Args:
+        order_numbers: 発注番号のリスト
+
+    Returns:
+        list: [{'発注番号': str, '製番': str, '品名': str, '仕様１': str, '発注数': int}, ...]
+    """
+    if not order_numbers:
+        return []
+
+    conn = None
+    try:
+        conn, cursor = get_connection()
+
+        # IN句用のプレースホルダー作成
+        placeholders = ','.join(['?' for _ in order_numbers])
+        # 8桁ゼロパディング
+        padded_numbers = [str(n).zfill(8) for n in order_numbers]
+
+        sql = f"""
+            SELECT 発注番号, 製番, 品名, 仕様１, 発注数, 単位
+            FROM dbo.[V_D発注]
+            WHERE 発注番号 IN ({placeholders})
+            ORDER BY 発注番号 DESC
+        """
+
+        cursor.execute(sql, padded_numbers)
+        rows = cursor.fetchall()
+
+        details = []
+        for row in rows:
+            details.append({
+                '発注番号': format_value(row[0]),
+                '製番': format_value(row[1]),
+                '品名': format_value(row[2]),
+                '仕様１': format_value(row[3]),
+                '発注数': format_value(row[4]),
+                '単位': format_value(row[5])
+            })
+
+        return details
+    except Exception as e:
+        print(f"発注詳細取得エラー: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
 
 
 def get_seiban_updates(seiban):
