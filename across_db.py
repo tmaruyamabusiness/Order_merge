@@ -1076,7 +1076,16 @@ def get_delivery_schedule_from_db(start_date=None, days=7, seibans=None):
         days_dict = {}
 
         for row in rows:
-            delivery_date = format_value(row[7])  # 納期
+            raw_date = row[7]  # 納期
+            delivery_date_display = format_value(raw_date)  # 表示用 (YY/MM/DD)
+
+            # 日付キー用 (YYYY-MM-DD形式)
+            date_key = None
+            if raw_date:
+                if isinstance(raw_date, (datetime, date)):
+                    date_key = raw_date.strftime('%Y-%m-%d')
+                else:
+                    date_key = str(raw_date)
 
             item = {
                 '発注番号': format_value(row[0]),
@@ -1086,16 +1095,16 @@ def get_delivery_schedule_from_db(start_date=None, days=7, seibans=None):
                 '発注数': format_value(row[4]),
                 '単位': format_value(row[5]),
                 '仕入先': format_value(row[6]),
-                '納期': delivery_date,
+                '納期': delivery_date_display,
                 '手配区分': format_value(row[8])
             }
             items.append(item)
 
-            # 日別グループ化
-            if delivery_date:
-                if delivery_date not in days_dict:
-                    days_dict[delivery_date] = []
-                days_dict[delivery_date].append(item)
+            # 日別グループ化 (YYYY-MM-DD形式のキー)
+            if date_key:
+                if date_key not in days_dict:
+                    days_dict[date_key] = []
+                days_dict[date_key].append(item)
 
         return {
             'success': True,
