@@ -1041,12 +1041,12 @@ def get_delivery_schedule_from_db(start_date=None, days=7, seibans=None):
     try:
         conn, cursor = get_connection()
 
+        from datetime import datetime, date, timedelta
+
         # 日付範囲
         if start_date:
-            from datetime import datetime, timedelta
             start = datetime.strptime(start_date, '%Y-%m-%d').date()
         else:
-            from datetime import date, timedelta
             start = date.today()
 
         end = start + timedelta(days=days)
