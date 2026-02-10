@@ -47,13 +47,15 @@
             </div>
             <!-- 詳細表示エリア -->
             <div id="dbUpdateDetails" style="display:none; margin-top:10px; background:rgba(255,255,255,0.15); border-radius:6px; padding:10px; max-height:300px; overflow-y:auto;">
-                <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
+                <table style="width:100%; border-collapse:collapse; font-size:0.85em;">
                     <thead>
                         <tr style="border-bottom:1px solid rgba(255,255,255,0.3);">
                             <th style="text-align:left; padding:5px;">製番</th>
                             <th style="text-align:left; padding:5px;">品名</th>
                             <th style="text-align:left; padding:5px;">仕様１</th>
                             <th style="text-align:right; padding:5px;">数量</th>
+                            <th style="text-align:left; padding:5px;">仕入先</th>
+                            <th style="text-align:left; padding:5px;">納期</th>
                         </tr>
                     </thead>
                     <tbody id="dbUpdateDetailsBody">
@@ -1284,11 +1286,13 @@
                             <td style="padding:5px;">${item['品名'] || '-'}</td>
                             <td style="padding:5px;">${item['仕様１'] || '-'}</td>
                             <td style="padding:5px; text-align:right;">${item['発注数'] || '-'} ${item['単位'] || ''}</td>
+                            <td style="padding:5px;">${item['仕入先'] || '-'}</td>
+                            <td style="padding:5px;">${item['納期'] || '-'}</td>
                         `;
                         detailsBody.appendChild(tr);
                     });
                 } else {
-                    detailsBody.innerHTML = '<tr><td colspan="4" style="padding:10px; text-align:center; opacity:0.7;">詳細情報なし</td></tr>';
+                    detailsBody.innerHTML = '<tr><td colspan="6" style="padding:10px; text-align:center; opacity:0.7;">詳細情報なし</td></tr>';
                 }
 
                 bar.style.display = 'block';

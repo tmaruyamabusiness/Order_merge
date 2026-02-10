@@ -974,7 +974,7 @@ def get_new_order_details(order_numbers):
         order_numbers: 発注番号のリスト
 
     Returns:
-        list: [{'発注番号': str, '製番': str, '品名': str, '仕様１': str, '発注数': int}, ...]
+        list: [{'発注番号': str, '製番': str, '品名': str, '仕様１': str, '発注数': int, '仕入先': str, '納期': str}, ...]
     """
     if not order_numbers:
         return []
@@ -989,7 +989,7 @@ def get_new_order_details(order_numbers):
         padded_numbers = [str(n).zfill(8) for n in order_numbers]
 
         sql = f"""
-            SELECT 発注番号, 製番, 品名, 仕様１, 発注数, 単位
+            SELECT 発注番号, 製番, 品名, 仕様１, 発注数, 単位, 仕入先略称, 納期
             FROM dbo.[V_D発注]
             WHERE 発注番号 IN ({placeholders})
             ORDER BY 発注番号 DESC
@@ -1006,7 +1006,9 @@ def get_new_order_details(order_numbers):
                 '品名': format_value(row[2]),
                 '仕様１': format_value(row[3]),
                 '発注数': format_value(row[4]),
-                '単位': format_value(row[5])
+                '単位': format_value(row[5]),
+                '仕入先': format_value(row[6]),
+                '納期': format_value(row[7])
             })
 
         return details
