@@ -1020,6 +1020,98 @@ def get_new_order_details(order_numbers):
             conn.close()
 
 
+def get_delivery_schedule_from_db(start_date=None, days=7, seibans=None):
+    """
+    発注DBから納品予定を取得
+
+    Args:
+        start_date: 開始日 (YYYY-MM-DD形式、Noneで今日)
+        days: 取得日数 (デフォルト7日)
+        seibans: 製番リスト（指定時はその製番のみ）
+
+    Returns:
+        dict: {
+            'success': bool,
+            'items': [{'製番': str, '品名': str, ...}, ...],
+            'days': {date: [items]},
+            'total': int
+        }
+    """
+    conn = None
+    try:
+        conn, cursor = get_connection()
+
+        # 日付範囲
+        if start_date:
+            from datetime import datetime, timedelta
+            start = datetime.strptime(start_date, '%Y-%m-%d').date()
+        else:
+            from datetime import date, timedelta
+            start = date.today()
+
+        end = start + timedelta(days=days)
+
+        # SQLクエリ構築
+        sql = """
+            SELECT
+                発注番号, 製番, 品名, 仕様１, 発注数, 単位,
+                仕入先略称, 納期, 手配区分
+            FROM dbo.[V_D発注残]
+            WHERE 納期 >= ? AND 納期 <= ?
+        """
+        params = [start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')]
+
+        # 製番指定がある場合
+        if seibans and len(seibans) > 0:
+            placeholders = ','.join(['?' for _ in seibans])
+            sql += f" AND 製番 IN ({placeholders})"
+            params.extend(seibans)
+
+        sql += " ORDER BY 納期, 製番, 品名"
+
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+
+        items = []
+        days_dict = {}
+
+        for row in rows:
+            delivery_date = format_value(row[7])  # 納期
+
+            item = {
+                '発注番号': format_value(row[0]),
+                '製番': format_value(row[1]),
+                '品名': format_value(row[2]),
+                '仕様１': format_value(row[3]),
+                '発注数': format_value(row[4]),
+                '単位': format_value(row[5]),
+                '仕入先': format_value(row[6]),
+                '納期': delivery_date,
+                '手配区分': format_value(row[8])
+            }
+            items.append(item)
+
+            # 日別グループ化
+            if delivery_date:
+                if delivery_date not in days_dict:
+                    days_dict[delivery_date] = []
+                days_dict[delivery_date].append(item)
+
+        return {
+            'success': True,
+            'items': items,
+            'days': days_dict,
+            'total': len(items),
+            'start_date': start.strftime('%Y-%m-%d'),
+            'end_date': end.strftime('%Y-%m-%d')
+        }
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+    finally:
+        if conn:
+            conn.close()
+
+
 def get_seiban_updates(seiban):
     """
     特定製番の手配・発注の更新状況を取得
