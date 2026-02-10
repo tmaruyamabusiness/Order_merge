@@ -600,6 +600,14 @@ function printDeliverySchedule() {
 
 let dbDeliveryData = null;
 
+// DB納品予定のフィルター状態
+let dbDsFilters = {
+    seiban: '',
+    supplier: '',
+    orderType: '',
+    date: ''
+};
+
 // DB開始日リセット
 function resetDbDeliveryDate() {
     const input = document.getElementById('dbDeliveryStartDate');
@@ -644,6 +652,120 @@ async function loadDbDeliverySchedule() {
     }
 }
 
+// DB納品予定用フィルターオプションを構築
+function buildDbFilterOptions(data) {
+    const seibans = new Set();
+    const suppliers = new Set();
+    const orderTypes = new Set();
+    const dates = [];
+
+    const sortedDates = Object.keys(data.days).sort();
+    const today = new Date().toISOString().split('T')[0];
+
+    sortedDates.forEach(dateKey => {
+        const items = data.days[dateKey];
+        const isToday = dateKey === today;
+        // 日付表示用フォーマット
+        const d = new Date(dateKey);
+        const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+        const displayDate = `${d.getMonth() + 1}/${d.getDate()}(${weekdays[d.getDay()]})`;
+        dates.push({ value: dateKey, label: displayDate, isToday, count: items.length });
+
+        items.forEach(item => {
+            if (item['製番']) seibans.add(item['製番']);
+            if (item['仕入先']) suppliers.add(item['仕入先']);
+            if (item['手配区分']) orderTypes.add(item['手配区分']);
+        });
+    });
+
+    return {
+        seibans: [...seibans].sort(),
+        suppliers: [...suppliers].sort(),
+        orderTypes: [...orderTypes].sort(),
+        dates
+    };
+}
+
+// DB納品予定フィルター適用
+function applyDbDeliveryFilters() {
+    dbDsFilters.seiban = (document.getElementById('dbDsFilterSeiban')?.value || '').toLowerCase();
+    dbDsFilters.supplier = (document.getElementById('dbDsFilterSupplier')?.value || '').toLowerCase();
+    dbDsFilters.orderType = (document.getElementById('dbDsFilterOrderType')?.value || '').toLowerCase();
+    dbDsFilters.date = document.getElementById('dbDsFilterDate')?.value || '';
+    filterDbDeliveryRows();
+}
+
+// DB納品予定フィルタークリア
+function clearDbDeliveryFilters() {
+    ['dbDsFilterSeiban', 'dbDsFilterSupplier', 'dbDsFilterOrderType', 'dbDsFilterDate'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    dbDsFilters = { seiban: '', supplier: '', orderType: '', date: '' };
+    filterDbDeliveryRows();
+}
+
+// DB納品予定の行フィルタリング
+function filterDbDeliveryRows() {
+    const rows = document.querySelectorAll('tr.dbds-item-row');
+    rows.forEach(row => {
+        const seiban = (row.dataset.seiban || '').toLowerCase();
+        const supplier = (row.dataset.supplier || '').toLowerCase();
+        const orderType = (row.dataset.ordertype || '').toLowerCase();
+        const rowDate = row.dataset.date || '';
+
+        const match =
+            (!dbDsFilters.seiban || seiban.includes(dbDsFilters.seiban)) &&
+            (!dbDsFilters.supplier || supplier.includes(dbDsFilters.supplier)) &&
+            (!dbDsFilters.orderType || orderType.includes(dbDsFilters.orderType)) &&
+            (!dbDsFilters.date || rowDate === dbDsFilters.date);
+
+        row.style.display = match ? '' : 'none';
+    });
+
+    // 日付セクションの表示制御
+    if (dbDeliveryData) {
+        const sortedDates = Object.keys(dbDeliveryData.days).sort();
+        sortedDates.forEach(dateKey => {
+            const daySection = document.getElementById('dbDeliveryDay_' + dateKey);
+            const dayContainer = daySection?.closest('.dbds-day-container');
+            if (dayContainer) {
+                if (dbDsFilters.date && dateKey !== dbDsFilters.date) {
+                    dayContainer.style.display = 'none';
+                } else {
+                    dayContainer.style.display = '';
+                    // 該当日の表示件数を更新
+                    const visibleRows = daySection.querySelectorAll('tr.dbds-item-row:not([style*="display: none"])');
+                    const countEl = document.getElementById('dbDeliveryDayCount_' + dateKey);
+                    if (countEl) {
+                        const totalRows = daySection.querySelectorAll('tr.dbds-item-row').length;
+                        if (visibleRows.length === totalRows) {
+                            countEl.textContent = `${totalRows}件`;
+                        } else {
+                            countEl.textContent = `${visibleRows.length}/${totalRows}件`;
+                        }
+                    }
+                }
+            }
+        });
+    }
+}
+
+// DB納品予定の日ごと折りたたみ切替
+function toggleDbDeliveryDay(dateKey) {
+    const el = document.getElementById('dbDeliveryDay_' + dateKey);
+    const arrow = document.getElementById('dbDeliveryDayArrow_' + dateKey);
+    if (!el) return;
+
+    if (el.style.display === 'none') {
+        el.style.display = 'block';
+        if (arrow) arrow.style.transform = 'rotate(0deg)';
+    } else {
+        el.style.display = 'none';
+        if (arrow) arrow.style.transform = 'rotate(-90deg)';
+    }
+}
+
 // 発注DB納品予定を描画
 function renderDbDeliverySchedule(data) {
     const container = document.getElementById('dbDeliveryScheduleContent');
@@ -654,10 +776,19 @@ function renderDbDeliverySchedule(data) {
         return;
     }
 
+    const opts = buildDbFilterOptions(data);
+    const today = new Date().toISOString().split('T')[0];
     let html = '';
 
     // サマリー
+    const todayData = opts.dates.find(d => d.isToday);
+    const todayCount = todayData ? todayData.count : 0;
+
     html += `<div style="display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 150px; background: ${todayCount > 0 ? '#fff3cd' : '#d4edda'}; padding: 12px 18px; border-radius: 8px; border-left: 4px solid ${todayCount > 0 ? '#ffc107' : '#28a745'};">
+            <div style="font-size: 0.85em; color: #666;">今日の納品</div>
+            <div style="font-size: 1.8em; font-weight: bold; color: ${todayCount > 0 ? '#856404' : '#155724'};">${todayCount}件</div>
+        </div>
         <div style="flex: 1; min-width: 150px; background: #e8f5e9; padding: 12px 18px; border-radius: 8px; border-left: 4px solid #28a745;">
             <div style="font-size: 0.85em; color: #666;">期間合計</div>
             <div style="font-size: 1.8em; font-weight: bold; color: #155724;">${data.total}件</div>
@@ -669,30 +800,77 @@ function renderDbDeliverySchedule(data) {
         </div>
     </div>`;
 
-    // テーブル
-    html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.88em;">
-        <thead><tr style="background: #28a745; color: white;">
-            <th style="padding: 8px 10px; text-align: left; border: 1px solid #1e7e34;">納期</th>
-            <th style="padding: 8px 10px; text-align: left; border: 1px solid #1e7e34;">製番</th>
-            <th style="padding: 8px 10px; text-align: left; border: 1px solid #1e7e34;">仕入先</th>
-            <th style="padding: 8px 10px; text-align: left; border: 1px solid #1e7e34;">品名</th>
-            <th style="padding: 8px 10px; text-align: left; border: 1px solid #1e7e34;">仕様１</th>
-            <th style="padding: 8px 10px; text-align: left; border: 1px solid #1e7e34;">手配区分</th>
-            <th style="padding: 8px 10px; text-align: right; border: 1px solid #1e7e34;">数量</th>
-            <th style="padding: 8px 10px; text-align: left; border: 1px solid #1e7e34;">発注番号</th>
-        </tr></thead><tbody>`;
+    // フィルターバー
+    html += `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; padding:8px 12px; background:#f8f9fa; border-radius:8px;">
+        <span style="font-weight:bold; font-size:0.9em;">絞り込み:</span>
+        <select id="dbDsFilterDate" onchange="applyDbDeliveryFilters()" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.88em;">
+            <option value="">全日付</option>
+            ${opts.dates.map(d => `<option value="${d.value}">${d.label}${d.isToday ? ' [今日]' : ''} (${d.count}件)</option>`).join('')}
+        </select>
+        <select id="dbDsFilterSeiban" onchange="applyDbDeliveryFilters()" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.88em;">
+            <option value="">全製番</option>
+            ${opts.seibans.map(s => `<option value="${s}">${s}</option>`).join('')}
+        </select>
+        <select id="dbDsFilterSupplier" onchange="applyDbDeliveryFilters()" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.88em;">
+            <option value="">全仕入先</option>
+            ${opts.suppliers.map(s => `<option value="${s}">${s}</option>`).join('')}
+        </select>
+        <select id="dbDsFilterOrderType" onchange="applyDbDeliveryFilters()" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.88em;">
+            <option value="">全手配区分</option>
+            ${opts.orderTypes.map(t => `<option value="${t}">${t}</option>`).join('')}
+        </select>
+        <button onclick="clearDbDeliveryFilters()" style="padding:4px 10px; border:1px solid #ccc; border-radius:4px; background:#fff; cursor:pointer; font-size:0.88em;">クリア</button>
+    </div>`;
 
-    // 日付順にソート
+    // 日付順にソートして日ごとのセクションを作成
     const sortedDates = Object.keys(data.days).sort();
-    let rowNum = 0;
 
-    sortedDates.forEach(dateKey => {
+    sortedDates.forEach((dateKey, idx) => {
         const items = data.days[dateKey];
+        const isToday = dateKey === today;
 
-        items.forEach(item => {
-            const bgColor = rowNum % 2 === 0 ? '#ffffff' : '#f8f9fa';
-            html += `<tr style="background: ${bgColor}; border-bottom: 1px solid #dee2e6;">
-                <td style="padding: 6px 10px; white-space: nowrap;">${item['納期'] || '-'}</td>
+        // 日付表示用フォーマット
+        const d = new Date(dateKey);
+        const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+        const dayOfWeek = d.getDay();
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        const displayDate = `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}(${weekdays[dayOfWeek]})`;
+
+        const bgColor = isToday ? '#fffbea' : isWeekend ? '#fff0f0' : '#ffffff';
+        const borderColor = isToday ? '#ffc107' : isWeekend ? '#ffcccc' : '#dee2e6';
+        const todayBadge = isToday ? '<span style="background: #ffc107; color: #333; padding: 2px 8px; border-radius: 10px; font-size: 0.75em; font-weight: bold; margin-left: 8px;">TODAY</span>' : '';
+        const weekendBadge = isWeekend ? '<span style="background: #ffcccc; color: #cc0000; padding: 2px 8px; border-radius: 10px; font-size: 0.75em; margin-left: 8px;">休日</span>' : '';
+
+        // 今日または最初の日を展開、他は折りたたみ
+        const hasToday = sortedDates.includes(today);
+        const display = (isToday || (!hasToday && idx === 0)) ? 'block' : 'none';
+        const arrowRotate = display === 'block' ? '0deg' : '-90deg';
+
+        html += `<div class="dbds-day-container" style="background: ${bgColor}; border: 1px solid ${borderColor}; border-radius: 8px; margin-bottom: 10px; overflow: hidden;">`;
+        html += `<div style="padding: 10px 15px; background: ${isToday ? '#fff3cd' : '#f8f9fa'}; border-bottom: 1px solid ${borderColor}; display: flex; align-items: center; justify-content: space-between; cursor: pointer;" onclick="toggleDbDeliveryDay('${dateKey}')">`;
+        html += `<div><strong style="font-size: 1.1em;">${displayDate}</strong>${todayBadge}${weekendBadge}</div>`;
+        html += `<div style="display: flex; align-items: center; gap: 10px;">
+            <span id="dbDeliveryDayCount_${dateKey}" style="background: #28a745; color: white; padding: 2px 10px; border-radius: 12px; font-weight: bold;">${items.length}件</span>
+            <span id="dbDeliveryDayArrow_${dateKey}" style="transition: transform 0.2s; transform: rotate(${arrowRotate});">&#9660;</span>
+        </div>`;
+        html += `</div>`;
+
+        // 明細テーブル
+        html += `<div id="dbDeliveryDay_${dateKey}" style="display: ${display}; padding: 0;">`;
+        html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.88em;">
+            <thead><tr style="background: #28a745; color: white;">
+                <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #1e7e34;">製番</th>
+                <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #1e7e34;">仕入先</th>
+                <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #1e7e34;">品名</th>
+                <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #1e7e34;">仕様１</th>
+                <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #1e7e34;">手配区分</th>
+                <th style="padding: 6px 10px; text-align: right; border-bottom: 1px solid #1e7e34;">数量</th>
+                <th style="padding: 6px 10px; text-align: left; border-bottom: 1px solid #1e7e34;">発注番号</th>
+            </tr></thead><tbody>`;
+
+        items.forEach((item, rowIdx) => {
+            const rowBg = rowIdx % 2 === 0 ? '#ffffff' : '#f8f9fa';
+            html += `<tr class="dbds-item-row" data-date="${dateKey}" data-seiban="${item['製番'] || ''}" data-supplier="${item['仕入先'] || ''}" data-ordertype="${item['手配区分'] || ''}" style="background: ${rowBg}; border-bottom: 1px solid #eee;">
                 <td style="padding: 6px 10px; font-weight: bold;">${item['製番'] || '-'}</td>
                 <td style="padding: 6px 10px;">${item['仕入先'] || '-'}</td>
                 <td style="padding: 6px 10px;">${item['品名'] || '-'}</td>
@@ -701,11 +879,11 @@ function renderDbDeliverySchedule(data) {
                 <td style="padding: 6px 10px; text-align: right;">${item['発注数'] || '-'} ${item['単位'] || ''}</td>
                 <td style="padding: 6px 10px;">${item['発注番号'] || '-'}</td>
             </tr>`;
-            rowNum++;
         });
+
+        html += '</tbody></table></div></div>';
     });
 
-    html += '</tbody></table>';
     container.innerHTML = html;
 }
 
@@ -718,15 +896,27 @@ function printDbDeliverySchedule() {
 
     const data = dbDeliveryData;
     const now = new Date().toLocaleString('ja-JP');
+    const today = new Date().toISOString().split('T')[0];
+    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
 
     let tableRows = '';
     const sortedDates = Object.keys(data.days).sort();
 
     sortedDates.forEach(dateKey => {
         const items = data.days[dateKey];
+        const d = new Date(dateKey);
+        const displayDate = `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}(${weekdays[d.getDay()]})`;
+        const isToday = dateKey === today;
+        const todayMark = isToday ? ' [TODAY]' : '';
+
+        // 日付ヘッダー行
+        tableRows += `<tr style="background: ${isToday ? '#fff3cd' : '#e9ecef'};">
+            <td colspan="7" style="padding: 8px; font-weight: bold; font-size: 1.1em; border: 1px solid #ccc;">
+                ${displayDate}${todayMark} - ${items.length}件
+            </td></tr>`;
+
         items.forEach(item => {
             tableRows += `<tr>
-                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['納期'] || '-'}</td>
                 <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['製番'] || '-'}</td>
                 <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['仕入先'] || '-'}</td>
                 <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['品名'] || '-'}</td>
@@ -752,7 +942,7 @@ function printDbDeliverySchedule() {
         <div class="info">印刷日時: ${now} ／ 期間: ${data.start_date} ～ ${data.end_date} ／ 合計: ${data.total}件</div>
         <table>
             <thead><tr>
-                <th>納期</th><th>製番</th><th>仕入先</th><th>品名</th><th>仕様１</th><th>手配区分</th><th>数量</th><th>発注番号</th>
+                <th>製番</th><th>仕入先</th><th>品名</th><th>仕様１</th><th>手配区分</th><th>数量</th><th>発注番号</th>
             </tr></thead>
             <tbody>${tableRows}</tbody>
         </table>
