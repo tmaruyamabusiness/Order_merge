@@ -870,11 +870,19 @@ function renderDbDeliverySchedule(data) {
 
         items.forEach((item, rowIdx) => {
             const rowBg = rowIdx % 2 === 0 ? '#ffffff' : '#f8f9fa';
+            const spec1 = item['仕様１'] || '';
+
+            // 仕様１がN**-で始まる場合はCADリンクを追加
+            let spec1Cell = spec1 || '-';
+            if (spec1 && /^N[A-Z]{2}-/.test(spec1)) {
+                spec1Cell = `<a href="/api/open-cad-by-spec/${encodeURIComponent(spec1)}" target="_blank" style="color: #0000FF; text-decoration: underline;" title="${spec1}">${spec1}</a>`;
+            }
+
             html += `<tr class="dbds-item-row" data-date="${dateKey}" data-seiban="${item['製番'] || ''}" data-supplier="${item['仕入先'] || ''}" data-ordertype="${item['手配区分'] || ''}" style="background: ${rowBg}; border-bottom: 1px solid #eee;">
                 <td style="padding: 6px 10px; font-weight: bold;">${item['製番'] || '-'}</td>
                 <td style="padding: 6px 10px;">${item['仕入先'] || '-'}</td>
                 <td style="padding: 6px 10px;">${item['品名'] || '-'}</td>
-                <td style="padding: 6px 10px; font-size: 0.9em;">${item['仕様１'] || '-'}</td>
+                <td style="padding: 6px 10px; font-size: 0.9em;">${spec1Cell}</td>
                 <td style="padding: 6px 10px; font-size: 0.9em;">${item['手配区分'] || '-'}</td>
                 <td style="padding: 6px 10px; text-align: right;">${item['発注数'] || '-'} ${item['単位'] || ''}</td>
                 <td style="padding: 6px 10px;">${item['発注番号'] || '-'}</td>
