@@ -5264,6 +5264,75 @@ def open_cad_file(detail_id):
         }), 500
 
 
+@app.route('/api/open-cad-by-spec/<path:spec1>')
+def open_cad_file_by_spec(spec1):
+    """仕様1から直接CADファイルを開く（DB納品予定用）"""
+    try:
+        cad_info = get_cad_file_info(spec1)
+
+        if not cad_info:
+            return jsonify({
+                'success': False,
+                'error': 'CADファイルが見つかりません'
+            }), 404
+
+        # 優先順位: PDF → mx2
+        if cad_info['has_pdf']:
+            file_path = cad_info['pdf_files'][0]
+            file_type = 'PDF'
+            mimetype = 'application/pdf'
+        elif cad_info['has_mx2']:
+            file_path = cad_info['mx2_files'][0]
+            file_type = 'MX2'
+            mimetype = 'application/octet-stream'
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'ファイルが見つかりません'
+            }), 404
+
+        client_ip = request.remote_addr
+        is_local = client_ip in ['127.0.0.1', '::1', 'localhost'] or \
+                   client_ip == request.host.split(':')[0]
+
+        # MX2ファイルかつローカルアクセスの場合のみ直接起動
+        if file_type == 'MX2' and is_local:
+            try:
+                os.startfile(file_path)
+                return jsonify({
+                    'success': True,
+                    'file_type': file_type,
+                    'file_name': os.path.basename(file_path),
+                    'message': 'iCAD MXで図面を開きました',
+                    'opened_locally': True
+                })
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'ファイルを開けませんでした: {str(e)}'
+                }), 500
+
+        # それ以外はダウンロード/表示
+        try:
+            return send_file(
+                file_path,
+                mimetype=mimetype,
+                as_attachment=(file_type == 'MX2'),
+                download_name=os.path.basename(file_path)
+            )
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': f'ファイルを送信できませんでした: {str(e)}'
+            }), 500
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 # ==================== 画像アップロード/表示機能 ====================
 
 # 画像保存ディレクトリ
