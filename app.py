@@ -62,13 +62,11 @@ except ImportError:
     }
     app.config['UPLOAD_FOLDER'] = 'uploads'
     app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size for large Excel files
-    
+
     # Network path configuration
-    app.config['DEFAULT_EXCEL_PATH'] = r'\\server3\Share-data\Document\仕入れ\002_手配リスト\手配発注_ALL.xlsx'
     app.config['HISTORY_EXCEL_PATH'] = r'\\server3\Share-data\Document\仕入れ\002_手配リスト\手配発注マージリスト発行履歴.xlsx'
     app.config['SEIBAN_LIST_PATH'] = r'\\server3\share-data\Document\Acrossデータ\製番一覧表.xlsx'
     app.config['EXPORT_EXCEL_PATH'] = r'\\SERVER3\Share-data\Document\仕入れ\002_手配リスト\手配発注リスト'
-    app.config['AUTO_REFRESH_INTERVAL'] = 3600  # 1時間ごとに自動更新
     app.config['USE_ODBC'] = False  # ODBCを使用する場合はTrue
     app.config['ODBC_CONNECTION_STRING'] = ''  # ODBC接続文字列（必要に応じて設定）
 
@@ -86,13 +84,7 @@ os.makedirs('cache', exist_ok=True)
 
 # Global variables for background tasks
 last_refresh_time = None
-refresh_thread = None
 cached_file_info = {}
-
-# 発注リストの高速検索用キャッシュ
-order_all_cache = {}
-order_all_cache_time = None
-CACHE_EXPIRY_SECONDS = 28800  # 8時間キャッシュ
 
 
 # Database Models
@@ -282,62 +274,6 @@ def to_jst(utc_dt):
     return utc_dt.astimezone(jst)
 
 # Utility Functions
-def check_network_file_access():
-    """Check if network file is accessible"""
-    try:
-        network_path = Path(app.config['DEFAULT_EXCEL_PATH'])
-        print(f"Checking path: {network_path}")  # デバッグログ
-        
-        if network_path.exists():
-            file_stats = network_path.stat()
-            file_size_mb = file_stats.st_size / (1024 * 1024)
-            modified_time = datetime.fromtimestamp(file_stats.st_mtime)
-            
-            result = {
-                'accessible': True,
-                'path': str(network_path),
-                'size_mb': round(file_size_mb, 2),
-                'modified': modified_time.isoformat(),
-                'filename': network_path.name
-            }
-            print(f"File info: {result}")  # デバッグログ
-            return result
-        else:
-            print(f"File not found: {network_path}")  # デバッグログ
-            return {
-                'accessible': False,
-                'error': f'ファイルが見つかりません: {network_path}'
-            }
-    except Exception as e:
-        print(f"Access error: {str(e)}")  # デバッグログ
-        return {
-            'accessible': False,
-            'error': f'アクセスエラー: {str(e)}'
-        }
-
-def copy_network_file_to_local():
-    """Copy network file to local cache"""
-    try:
-        # パスをそのまま使用（既に正しいUNCパス形式）
-        network_path = Path(app.config['DEFAULT_EXCEL_PATH'])
-        if not network_path.exists():
-            return None, f"ネットワークファイルが見つかりません: {network_path}"
-        
-        # Create cache filename with timestamp
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        cache_filename = f'cache/cached_{timestamp}_手配発注_ALL.xlsx'
-        
-        # Copy file to cache
-        shutil.copy2(str(network_path), cache_filename)
-        
-        global last_refresh_time, cached_file_info
-        last_refresh_time = datetime.now()
-        cached_file_info = check_network_file_access()
-        
-        return cache_filename, None
-    except Exception as e:
-        return None, f"コピーエラー: {str(e)}"
-    
 def get_cad_file_info(spec1):
     """仕様1からCADファイル情報を取得"""
     if not spec1 or not spec1.startswith('N'):
@@ -402,157 +338,7 @@ def load_seiban_info():
     except Exception as e:
         print(f"製番一覧表読み込みエラー: {str(e)}")
         return {}
-    
 
-def check_file_update():
-    """ファイルの更新をチェック"""
-    global cached_file_info
-    
-    try:
-        current_info = check_network_file_access()
-        if not current_info['accessible']:
-            return False, None
-        
-        if not cached_file_info:
-            return True, "初回読み込み"
-        
-        # 最終更新時刻を比較
-        cached_time = datetime.fromisoformat(cached_file_info.get('modified', ''))
-        current_time = datetime.fromisoformat(current_info['modified'])
-        
-        if current_time > cached_time:
-            return True, f"ファイルが更新されました（{current_time.strftime('%Y-%m-%d %H:%M:%S')}）"
-        
-        return False, None
-    except Exception as e:
-        return False, str(e)
-
-def load_order_all_cache():
-    """発注_ALLシートをメモリにキャッシュ（高速検索用）"""
-    global order_all_cache, order_all_cache_time
-    
-    try:
-        # キャッシュが有効か確認
-        if order_all_cache_time:
-            elapsed = (datetime.now(timezone.utc) - order_all_cache_time).total_seconds()
-            if elapsed < CACHE_EXPIRY_SECONDS:
-                print(f"✅ キャッシュ有効（残り{int(CACHE_EXPIRY_SECONDS - elapsed)}秒）")
-                return True
-        
-        print("🔄 発注_ALLシートを読み込み中...")
-        
-        excel_path = Path(app.config['DEFAULT_EXCEL_PATH'])
-        if not excel_path.exists():
-            print(f"❌ ファイルが見つかりません: {excel_path}")
-            return False
-        
-        # read_only=Trueで高速化、data_only=Trueで数式を評価
-        df = pd.read_excel(
-            str(excel_path), 
-            sheet_name='発注_ALL',
-            dtype={
-                '発注番号': str,
-                '納期': str,
-                '製番': str,
-                '材質': str,
-                '品名': str,
-                '仕様１': str,
-                '仕入先略称': str,
-                '発注数': str
-            }
-        )
-        
-        # 発注番号をキーとした辞書に変換（重複対応）
-        order_all_cache.clear()
-        
-        # 🔥 サンプルキーをログ出力
-        sample_keys = []
-        
-        for idx, row in df.iterrows():
-            order_num = DataUtils.safe_str(row.get('発注番号', ''))
-            if not order_num or order_num == '':
-                continue
-            
-            # 🔥 最初の10件のキーをサンプル収集
-            if len(sample_keys) < 10:
-                sample_keys.append(f"元の値: '{order_num}'")
-            
-            # 発注番号を正規化（浮動小数点対策）
-            order_num = DataUtils.normalize_order_number(order_num)
-            
-            # 🔥 正規化後のキーもサンプル収集
-            if len(sample_keys) < 20:
-                sample_keys.append(f"正規化後: '{order_num}'")
-            
-            # 同一発注番号が複数ある場合はリスト化
-            if order_num not in order_all_cache:
-                order_all_cache[order_num] = []
-            
-            order_all_cache[order_num].append({
-                'delivery_date': DataUtils.safe_str(row.get('納期', '')),
-                'seiban': DataUtils.safe_str(row.get('製番', '')),
-                'material': DataUtils.safe_str(row.get('材質', '')),
-                'item_name': DataUtils.safe_str(row.get('品名', '')),
-                'spec1': DataUtils.safe_str(row.get('仕様１', '')),
-                'supplier': DataUtils.safe_str(row.get('仕入先略称', '')),
-                'quantity': DataUtils.safe_int(row.get('発注数', 0)),
-                'unit_measure': DataUtils.safe_str(row.get('単位', '')),
-                'staff': DataUtils.safe_str(row.get('担当者', ''))
-            })
-        
-        order_all_cache_time = datetime.now(timezone.utc)
-        
-    except Exception as e:
-        print(f"❌ キャッシュ読み込みエラー: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-def search_order_from_cache(order_number):
-    """キャッシュから発注番号を検索"""
-    if not load_order_all_cache():
-        return None
-    
-    # 発注番号を正規化
-    search_key = DataUtils.normalize_order_number(order_number)
-    
-    # 🔥 デバッグログ追加
-    print(f"🔍 検索: 元の値='{order_number}' → 正規化後='{search_key}'")
-    
-    if search_key in order_all_cache:
-        print(f"  ✅ キャッシュHIT: {len(order_all_cache[search_key])}件")
-        return order_all_cache[search_key]
-    else:
-        # 🔥 部分一致検索を試行
-        print(f"  ❌ キャッシュMISS")
-        print(f"  🔎 類似キー検索中...")
-        similar_keys = [k for k in list(order_all_cache.keys())[:50] if search_key in k or k in search_key]
-        if similar_keys:
-            print(f"    類似キー（最大5件）: {similar_keys[:5]}")
-        else:
-            print(f"    類似キーなし")
-    
-    return None
-
-def auto_refresh_network_file():
-    """Background task to refresh network file periodically"""
-    while True:
-        time.sleep(app.config['AUTO_REFRESH_INTERVAL'])
-        try:
-            cache_file, error = copy_network_file_to_local()
-            if cache_file:
-                print(f"自動更新完了: {datetime.now()}")
-            else:
-                print(f"自動更新エラー: {error}")
-        except Exception as e:
-            print(f"自動更新例外: {str(e)}")
-
-# Start background refresh thread
-def start_auto_refresh():
-    global refresh_thread
-    if not refresh_thread or not refresh_thread.is_alive():
-        refresh_thread = threading.Thread(target=auto_refresh_network_file, daemon=True)
-        refresh_thread.start()
 
 def extract_seiban_from_filename(filename):
     """Extract seiban (MHTxxxx) from filename"""
@@ -1843,96 +1629,11 @@ def send_completion_email(order_id):
 
 @app.route('/api/check-network-file-with-diff')
 def check_network_file_with_diff():
-    """ネットワークファイルの存在確認と差分検出"""
-    try:
-        network_file = app.config['DEFAULT_EXCEL_PATH']
-        network_path = Path(network_file)
-        
-        if not network_path.exists():
-            return jsonify({
-                'accessible': False,
-                'error': 'ファイルが見つかりません'
-            })
-        
-        stat = network_path.stat()
-        
-        # 🔥 製番一覧表から情報を読み込み
-        seiban_info_dict = load_seiban_info()
-        
-        # Excelから全シートの製番を読み込み
-        try:
-            wb = load_workbook(str(network_path), read_only=True, data_only=True)
-            current_seiban_data = {}
-            
-            for sheet_name in wb.sheetnames:
-                ws = wb[sheet_name]
-                
-                for row in ws.iter_rows(min_row=2, values_only=True):
-                    if row and row[0]:  # 製番列
-                        seiban = str(row[0]).strip()
-                        if seiban and not seiban.startswith('#'):
-                            if seiban not in current_seiban_data:
-                                current_seiban_data[seiban] = 0
-                            current_seiban_data[seiban] += 1
-            
-            wb.close()
-            
-            # 前回のキャッシュと比較
-            cache_file = Path(app.config['UPLOAD_FOLDER']) / 'seiban_cache.json'
-            diff_list = []
-            
-            if cache_file.exists():
-                with open(cache_file, 'r', encoding='utf-8') as f:
-                    cached_data = json.load(f)
-                
-                # 差分を検出
-                for seiban, count in current_seiban_data.items():
-                    old_count = cached_data.get(seiban, 0)
-                    if count > old_count:
-                        added = count - old_count
-                        
-                        # 🔥 製番一覧表から追加情報を取得
-                        seiban_details = seiban_info_dict.get(seiban, {})
-                        
-                        diff_list.append({
-                            'seiban': seiban,
-                            'added': added,
-                            'total': count,
-                            'product_name': seiban_details.get('product_name', ''),
-                            'customer_abbr': seiban_details.get('customer_abbr', ''),
-                            'memo2': seiban_details.get('memo2', '')
-                        })
-                
-                # 差分を追加件数でソート
-                diff_list.sort(key=lambda x: x['added'], reverse=True)
-            
-            # 新しいデータをキャッシュ
-            with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump(current_seiban_data, f, ensure_ascii=False, indent=2)
-            
-            return jsonify({
-                'accessible': True,
-                'filename': network_path.name,
-                'size_mb': round(stat.st_size / (1024 * 1024), 2),
-                'modified': stat.st_mtime,
-                'total_seibans': len(current_seiban_data),
-                'diff': diff_list
-            })
-            
-        except Exception as e:
-            return jsonify({
-                'accessible': True,
-                'filename': network_path.name,
-                'size_mb': round(stat.st_size / (1024 * 1024), 2),
-                'modified': stat.st_mtime,
-                'error': f'データ読み込みエラー: {str(e)}'
-            })
-    
-    except Exception as e:
-        return jsonify({
-            'accessible': False,
-            'error': str(e)
-        })
+    """ネットワークファイルの存在確認と差分検出（廃止済み）"""
+    return jsonify({
+        'accessible': False,
+        'error': 'この機能は廃止されました。DBから直接取得してください。'
+    })
 
 @app.route('/api/seiban-list', methods=['GET'])
 def get_seiban_list():
@@ -2022,59 +1723,11 @@ def process_file_endpoint():
 # Routes
 @app.route('/api/refresh-excel', methods=['POST'])
 def refresh_excel_endpoint():
-    """複数のExcelファイルを更新するエンドポイント"""
-    try:
-        result = {'success': False, 'message': '', 'details': []}
-
-        def run_refresh():
-            success, message, details = refresh_excel_file()
-            result['success'] = success
-            result['message'] = message
-            result['details'] = details
-
-        thread = Thread(target=run_refresh)
-        thread.start()
-        thread.join(timeout=180)  # 複数ファイルのため3分に延長
-
-        if thread.is_alive():
-            return jsonify({
-                'success': False,
-                'error': 'タイムアウト（180秒）'
-            }), 500
-
-        if result['success']:
-            # キャッシュをクリア（手配発注_ALLのキャッシュも含む）
-            global cached_file_info, last_refresh_time, order_all_cache_time
-            last_refresh_time = datetime.now()
-            order_all_cache_time = None  # 手配発注_ALLキャッシュを無効化
-
-            # ファイル情報を取得
-            file_info = check_network_file_access()
-            cached_file_info = file_info
-
-            return jsonify({
-                'success': True,
-                'message': result['message'],
-                'file_info': file_info if file_info else {
-                    'accessible': True,
-                    'filename': 'Excel更新完了',
-                    'size_mb': 0,
-                    'modified': datetime.now().isoformat()
-                },
-                'details': result['details']  # 各ファイルの更新結果
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'error': result['message'],
-                'details': result['details']
-            }), 500
-            
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+    """複数のExcelファイルを更新するエンドポイント（廃止済み）"""
+    return jsonify({
+        'success': False,
+        'error': 'この機能は廃止されました。DBから直接取得してください。'
+    }), 400
 
 # Pythonスクリプトを実行するエンドポイントを修正
 @app.route('/api/run-refresh-script', methods=['POST'])
@@ -2173,98 +1826,25 @@ def generate_labels_endpoint():
 
 @app.route('/api/refresh-seiban', methods=['POST'])
 def refresh_seiban_endpoint():
-    """製番単位でデータを最新に更新"""
-    try:
-        data = request.json
-        seiban = data.get('seiban')
-
-        if not seiban:
-            return jsonify({'success': False, 'error': '製番が指定されていません'}), 400
-
-        # デフォルトのExcelファイルパスを取得
-        excel_path = app.config.get('DEFAULT_EXCEL_PATH')
-        if not excel_path or not os.path.exists(excel_path):
-            return jsonify({'success': False, 'error': 'Excelファイルが見つかりません'}), 404
-
-        # シート名（実際のシート名に合わせる）
-        sheet1_name = '手配リスト_ALL'
-        sheet2_name = '発注_ALL'
-
-        print(f"🔄 製番 {seiban} のデータを更新中...")
-
-        # Excelファイルを読み込み
-        df1 = pd.read_excel(excel_path, sheet_name=sheet1_name, header=0)
-        df2 = pd.read_excel(excel_path, sheet_name=sheet2_name, header=0)
-
-        # 製番でフィルタリング
-        df1_filtered = df1[df1['製番'].astype(str).str.strip() == seiban]
-        df2_filtered = df2[df2['製番'].astype(str).str.strip() == seiban]
-
-        if df1_filtered.empty and df2_filtered.empty:
-            return jsonify({
-                'success': False,
-                'error': f'製番 {seiban} のデータがExcelファイルに見つかりません'
-            }), 404
-
-        # 既存のデータを更新
-        result = process_excel_file_from_dataframes(df1_filtered, df2_filtered, seiban)
-
-        # Excelファイルも再生成
-        orders = Order.query.filter_by(seiban=seiban, is_archived=False).all()
-        if orders:
-            order = orders[0]
-            filepath = get_order_excel_path(seiban, order.product_name, order.customer_abbr)
-            if filepath:
-                wb = Workbook()
-                wb.remove(wb.active)
-                create_gantt_chart_sheet(wb, seiban, orders)
-                # 各ユニットのシートを作成
-                for o in orders:
-                    unit = o.unit if o.unit else 'ユニット名無し'
-                    sheet_name = f"{seiban}_{unit}"[:31]
-                    ws = wb.create_sheet(title=sheet_name)
-                    create_order_sheet(ws, o, sheet_name)
-                wb.save(filepath)
-                print(f"✅ Excelファイル更新: {filepath}")
-
-        # ユニット数と詳細数を取得
-        total_units = Order.query.filter_by(seiban=seiban, is_archived=False).count()
-        total_details = OrderDetail.query.join(Order).filter(
-            Order.seiban == seiban,
-            Order.is_archived == False
-        ).count()
-
-        print(f"✅ 製番 {seiban} を更新完了: {total_units}ユニット, {total_details}件")
-
-        return jsonify({
-            'success': True,
-            'message': f'{total_units}ユニット, {total_details}件更新',
-            'seiban': seiban,
-            'units': total_units,
-            'details': total_details
-        })
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)}), 500
+    """製番単位でデータを最新に更新（廃止済み）"""
+    return jsonify({
+        'success': False,
+        'error': 'この機能は廃止されました。DBから直接取得してください。'
+    }), 400
 
 @app.route('/')
 def index():
     """Main page"""
-    # Start auto refresh on first load
-    start_auto_refresh()
     return render_template('index.html')
 
 @app.route('/api/debug-paths')
 def debug_paths():
     """パスの接続状態をデバッグ"""
     import os
-    
+
     debug_info = {
         'configured_paths': {
-            'excel': app.config['DEFAULT_EXCEL_PATH'],
-            'history': app.config['HISTORY_EXCEL_PATH'],
+            'history': app.config.get('HISTORY_EXCEL_PATH', 'Not configured'),
             'seiban': app.config.get('SEIBAN_LIST_PATH', 'Not configured')
         },
         'path_checks': {}
@@ -2323,41 +1903,19 @@ def debug_paths():
 
 @app.route('/api/check-network-file')
 def check_network_file():
-    """Check if network file is accessible"""
-    file_info = check_network_file_access()
-    return jsonify(file_info)
+    """Check if network file is accessible（廃止済み）"""
+    return jsonify({
+        'accessible': False,
+        'error': 'この機能は廃止されました。DBから直接取得してください。'
+    })
 
 @app.route('/api/load-network-file', methods=['POST'])
 def load_network_file():
-    """Load file from network location"""
-    try:
-        # Try to copy network file to local cache
-        cache_file, error = copy_network_file_to_local()
-        
-        if error:
-            return jsonify({
-                'success': False,
-                'error': error,
-                'suggest_upload': True
-            }), 400
-        
-        # Load sheet names from cached file
-        wb = load_workbook(cache_file, read_only=True)
-        sheet_names = wb.sheetnames
-        wb.close()
-        
-        return jsonify({
-            'success': True,
-            'filepath': cache_file,
-            'sheet_names': sheet_names,
-            'file_info': cached_file_info
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'suggest_upload': True
-        }), 500
+    """Load file from network location（廃止済み）"""
+    return jsonify({
+        'success': False,
+        'error': 'この機能は廃止されました。DBから直接取得してください。'
+    }), 400
 
 @app.route('/api/load-from-odbc', methods=['POST'])
 def load_from_odbc_endpoint():
@@ -2674,15 +2232,12 @@ def across_db_0zaiko():
 
 @app.route('/api/get-system-status')
 def get_system_status():
-    """Get system status including cache and refresh info"""
+    """Get system status"""
     try:
         status = {
             'last_refresh': last_refresh_time.isoformat() if last_refresh_time else None,
             'cached_file': cached_file_info,
-            'auto_refresh_enabled': refresh_thread and refresh_thread.is_alive() if refresh_thread else False,
-            'refresh_interval_minutes': app.config['AUTO_REFRESH_INTERVAL'] / 60,
-            'odbc_enabled': app.config['USE_ODBC'],
-            'network_path': app.config['DEFAULT_EXCEL_PATH']
+            'odbc_enabled': app.config.get('USE_ODBC', False)
         }
         return jsonify(status)
     except Exception as e:
@@ -4329,12 +3884,10 @@ def get_detail_logs(detail_id):
 
 @app.route('/api/check-update')
 def check_update():
-    """ファイルの更新をチェック"""
-    has_update, message = check_file_update()
+    """ファイルの更新をチェック（廃止済み - DBから直接取得に移行）"""
     return jsonify({
-        'has_update': has_update,
-        'message': message,
-        'current_info': cached_file_info
+        'has_update': False,
+        'message': 'この機能は廃止されました。DBから直接取得してください。'
     })
 
 @app.route('/api/load-history')
@@ -4498,22 +4051,15 @@ def import_history():
 
 @app.route('/api/search-by-spec1/<spec1>')
 def search_by_spec1(spec1):
-    """仕様１で検索（マージ済み + 未マージ対応）"""
+    """仕様１で検索"""
     try:
-        print(f"\n{'='*60}")
-        print(f"🔍 仕様１検索: {spec1}")
-        print(f"{'='*60}")
-        
-        # 1. マージ済みデータから検索
+        # マージ済みデータから検索
         details = OrderDetail.query.filter(
             OrderDetail.spec1.contains(spec1)
         ).all()
-        
-        print(f"  マージ済みデータ: {len(details)}件")
-        
+
         result_list = []
-        
-        # マージ済みデータを結果に追加
+
         for detail in details:
             result_list.append({
                 'id': detail.id,
@@ -4533,119 +4079,39 @@ def search_by_spec1(spec1):
                 'source': 'merged'
             })
 
-        # 🔥 キャッシュが存在するか、または読み込みが必要かをフラグで返す
-        cache_needs_loading = False
-        if not order_all_cache_time:
-            cache_needs_loading = True
-        else:
-            elapsed = (datetime.now(timezone.utc) - order_all_cache_time).total_seconds()
-            if elapsed >= CACHE_EXPIRY_SECONDS:
-                cache_needs_loading = True
-        
-        # 🔥 2. 未マージデータを検索（発注_ALLシートから）
-        if not load_order_all_cache():
-            print(f"  ⚠️  キャッシュ読み込み失敗")
-        else:
-            print(f"  キャッシュから検索中...")
-            matched_count = 0
-            
-            # 全キャッシュから仕様１で検索
-            for order_num, items in order_all_cache.items():
-                for item in items:
-                    item_spec1 = item.get('spec1', '')
-                    
-                    # 🔥 部分一致検索（大文字小文字無視）
-                    if spec1.upper() in item_spec1.upper():
-                        matched_count += 1
-                        
-                        # 🔥 マージ済みデータと重複していないか確認
-                        is_duplicate = any(
-                            r['seiban'] == item['seiban'] and 
-                            r['spec1'] == item_spec1 and
-                            r['item_name'] == item['item_name']
-                            for r in result_list
-                        )
-                        
-                        if not is_duplicate:
-                            result_list.append({
-                                'id': None,
-                                'order_id': None,
-                                'seiban': item['seiban'],
-                                'unit': item['material'],
-                                'item_name': item['item_name'],
-                                'spec1': item_spec1,
-                                'order_number': order_num,
-                                'quantity': item['quantity'],
-                                'unit_measure': item['unit_measure'],
-                                'is_received': False,
-                                'delivery_date': item['delivery_date'],
-                                'supplier': item['supplier'],
-                                'staff': item.get('staff', ''),
-                                'source': 'order_all'
-                            })
-            
-            print(f"  キャッシュから: {matched_count}件ヒット（重複除外後: {len([r for r in result_list if r['source'] == 'order_all'])}件）")
-        
-        print(f"  合計結果: {len(result_list)}件")
-        print(f"{'='*60}\n")
-        
         if not result_list:
             return jsonify({
                 'found': False,
-                'message': f'仕様１ "{spec1}" が見つかりません（マージ済み・未マージ両方を検索しました）',
-                'cache_needs_loading': cache_needs_loading 
+                'message': f'仕様１ "{spec1}" が見つかりません'
             }), 404
-        
+
         return jsonify({
             'found': True,
             'count': len(result_list),
-            'details': result_list,
-            'has_unmerged': any(r['source'] == 'order_all' for r in result_list),
-            'cache_needs_loading': cache_needs_loading
+            'details': result_list
         })
     except Exception as e:
-        print(f"❌ 検索エラー: {e}")
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/search-by-purchase-order/<purchase_order_number>')
 def search_by_purchase_order(purchase_order_number):
-    """発注番号で検索（浮動小数点対応 + 未マージデータ対応）"""
+    """発注番号で検索"""
     try:
-        # 🔥 デバッグログ
-        print(f"\n{'='*60}")
-        print(f"🔍 発注番号検索: {purchase_order_number}")
-        print(f"{'='*60}")
-        
         # 浮動小数点数として入力された場合の対策
         search_number = purchase_order_number
         if '.' in search_number and search_number.endswith('.0'):
             search_number = search_number.replace('.0', '')
-        
-        print(f"  正規化後: {search_number}")
 
-        cache_needs_loading = False
-        if not order_all_cache_time:
-            cache_needs_loading = True
-        else:
-            elapsed = (datetime.now(timezone.utc) - order_all_cache_time).total_seconds()
-            if elapsed >= CACHE_EXPIRY_SECONDS:
-                cache_needs_loading = True
-        
-        # 1. マージ済みデータから検索
+        # マージ済みデータから検索
         details = OrderDetail.query.filter(
             db.or_(
                 OrderDetail.order_number == search_number,
                 OrderDetail.order_number == purchase_order_number
             )
         ).all()
-        
-        print(f"  マージ済みデータ: {len(details)}件")
-        
+
         result_list = []
-        
-        # マージ済みデータを結果に追加
+
         for detail in details:
             result_list.append({
                 'id': detail.id,
@@ -4663,61 +4129,19 @@ def search_by_purchase_order(purchase_order_number):
                 'source': 'merged',
                 'staff': '-'
             })
-        
-        # 2. 未マージデータを検索（発注_ALLシートから）
-        cache_results = search_order_from_cache(search_number)
-        
-        if cache_results:
-            print(f"  キャッシュから: {len(cache_results)}件")
-            for item in cache_results:
-                # マージ済みデータと重複していないか確認
-                is_duplicate = any(
-                    r['seiban'] == item['seiban'] and 
-                    r['spec1'] == item['spec1'] and
-                    r['item_name'] == item['item_name']
-                    for r in result_list
-                )
-                
-                if not is_duplicate:
-                    result_list.append({
-                        'id': None,
-                        'order_id': None,
-                        'seiban': item['seiban'],
-                        'unit': item['material'],
-                        'item_name': item['item_name'],
-                        'spec1': item['spec1'],
-                        'quantity': item['quantity'],
-                        'unit_measure': item['unit_measure'],
-                        'is_received': False,
-                        'delivery_date': item['delivery_date'],
-                        'staff': item.get('staff', ''),
-                        'supplier': item['supplier'],
-                        'source': 'order_all'
-                    })
-        else:
-            print(f"  キャッシュから: 0件")
-        
-        print(f"  合計結果: {len(result_list)}件")
-        print(f"{'='*60}\n")
-        
+
         if not result_list:
             return jsonify({
                 'found': False,
-                'message': f'発注番号 {purchase_order_number} が見つかりません（マージ済み・未マージ両方を検索しました）',
-                'cache_needs_loading': cache_needs_loading
+                'message': f'発注番号 {purchase_order_number} が見つかりません'
             }), 404
-        
+
         return jsonify({
             'found': True,
             'count': len(result_list),
-            'details': result_list,
-            'has_unmerged': any(r['source'] == 'order_all' for r in result_list),
-            'cache_needs_loading': cache_needs_loading
+            'details': result_list
         })
     except Exception as e:
-        print(f"❌ 検索エラー: {e}")
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/receive-by-purchase-order', methods=['POST'])
