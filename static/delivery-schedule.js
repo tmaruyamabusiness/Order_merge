@@ -592,3 +592,171 @@ function printDeliverySchedule() {
     </body></html>`);
     printWindow.document.close();
 }
+
+
+// ========================================
+// 発注DB直接取得 - 納品予定
+// ========================================
+
+let dbDeliveryData = null;
+
+// DB開始日リセット
+function resetDbDeliveryDate() {
+    const input = document.getElementById('dbDeliveryStartDate');
+    if (input) {
+        input.value = '';
+    }
+    loadDbDeliverySchedule();
+}
+
+// 発注DBから納品予定を読み込み
+async function loadDbDeliverySchedule() {
+    const container = document.getElementById('dbDeliveryScheduleContent');
+    if (!container) return;
+
+    container.innerHTML = '<p style="text-align: center; padding: 20px; color: #6c757d;">読み込み中...</p>';
+
+    try {
+        let url = '/api/across-db/delivery-schedule';
+        const startDateInput = document.getElementById('dbDeliveryStartDate');
+        const params = new URLSearchParams();
+
+        if (startDateInput && startDateInput.value) {
+            params.append('start_date', startDateInput.value);
+        }
+
+        if (params.toString()) {
+            url += '?' + params.toString();
+        }
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (!data.success) {
+            container.innerHTML = `<p style="color: #dc3545;">エラー: ${data.error}</p>`;
+            return;
+        }
+
+        dbDeliveryData = data;
+        renderDbDeliverySchedule(data);
+    } catch (error) {
+        container.innerHTML = `<p style="color: #dc3545;">読み込みエラー: ${error}</p>`;
+    }
+}
+
+// 発注DB納品予定を描画
+function renderDbDeliverySchedule(data) {
+    const container = document.getElementById('dbDeliveryScheduleContent');
+    if (!container) return;
+
+    if (data.total === 0) {
+        container.innerHTML = '<p style="text-align: center; padding: 20px; color: #6c757d;">指定期間の納品予定はありません</p>';
+        return;
+    }
+
+    let html = '';
+
+    // サマリー
+    html += `<div style="display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 150px; background: #e8f5e9; padding: 12px 18px; border-radius: 8px; border-left: 4px solid #28a745;">
+            <div style="font-size: 0.85em; color: #666;">期間合計</div>
+            <div style="font-size: 1.8em; font-weight: bold; color: #155724;">${data.total}件</div>
+            <div style="font-size: 0.8em; color: #888;">${data.start_date} ～ ${data.end_date}</div>
+        </div>
+        <div style="flex: 1; min-width: 150px; background: #f8f9fa; padding: 12px 18px; border-radius: 8px; border-left: 4px solid #6c757d;">
+            <div style="font-size: 0.85em; color: #666;">日数</div>
+            <div style="font-size: 1.2em; font-weight: bold; color: #333;">${Object.keys(data.days).length}日</div>
+        </div>
+    </div>`;
+
+    // テーブル
+    html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.88em;">
+        <thead><tr style="background: #28a745; color: white;">
+            <th style="padding: 8px 10px; text-align: left; border: 1px solid #1e7e34;">納期</th>
+            <th style="padding: 8px 10px; text-align: left; border: 1px solid #1e7e34;">製番</th>
+            <th style="padding: 8px 10px; text-align: left; border: 1px solid #1e7e34;">仕入先</th>
+            <th style="padding: 8px 10px; text-align: left; border: 1px solid #1e7e34;">品名</th>
+            <th style="padding: 8px 10px; text-align: left; border: 1px solid #1e7e34;">仕様１</th>
+            <th style="padding: 8px 10px; text-align: left; border: 1px solid #1e7e34;">手配区分</th>
+            <th style="padding: 8px 10px; text-align: right; border: 1px solid #1e7e34;">数量</th>
+            <th style="padding: 8px 10px; text-align: left; border: 1px solid #1e7e34;">発注番号</th>
+        </tr></thead><tbody>`;
+
+    // 日付順にソート
+    const sortedDates = Object.keys(data.days).sort();
+    let rowNum = 0;
+
+    sortedDates.forEach(dateKey => {
+        const items = data.days[dateKey];
+
+        items.forEach(item => {
+            const bgColor = rowNum % 2 === 0 ? '#ffffff' : '#f8f9fa';
+            html += `<tr style="background: ${bgColor}; border-bottom: 1px solid #dee2e6;">
+                <td style="padding: 6px 10px; white-space: nowrap;">${item['納期'] || '-'}</td>
+                <td style="padding: 6px 10px; font-weight: bold;">${item['製番'] || '-'}</td>
+                <td style="padding: 6px 10px;">${item['仕入先'] || '-'}</td>
+                <td style="padding: 6px 10px;">${item['品名'] || '-'}</td>
+                <td style="padding: 6px 10px; font-size: 0.9em;">${item['仕様１'] || '-'}</td>
+                <td style="padding: 6px 10px; font-size: 0.9em;">${item['手配区分'] || '-'}</td>
+                <td style="padding: 6px 10px; text-align: right;">${item['発注数'] || '-'} ${item['単位'] || ''}</td>
+                <td style="padding: 6px 10px;">${item['発注番号'] || '-'}</td>
+            </tr>`;
+            rowNum++;
+        });
+    });
+
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+// 発注DB納品予定を印刷
+function printDbDeliverySchedule() {
+    if (!dbDeliveryData || dbDeliveryData.total === 0) {
+        alert('納品予定データがありません');
+        return;
+    }
+
+    const data = dbDeliveryData;
+    const now = new Date().toLocaleString('ja-JP');
+
+    let tableRows = '';
+    const sortedDates = Object.keys(data.days).sort();
+
+    sortedDates.forEach(dateKey => {
+        const items = data.days[dateKey];
+        items.forEach(item => {
+            tableRows += `<tr>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['納期'] || '-'}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['製番'] || '-'}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['仕入先'] || '-'}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['品名'] || '-'}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['仕様１'] || '-'}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['手配区分'] || '-'}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc; text-align: right;">${item['発注数'] || '-'} ${item['単位'] || ''}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['発注番号'] || '-'}</td>
+            </tr>`;
+        });
+    });
+
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`<!DOCTYPE html><html><head><title>納品予定表（発注DB）</title>
+        <style>
+            @media print { @page { size: landscape; margin: 8mm; } body { margin: 0; } }
+            body { font-family: 'Meiryo', sans-serif; font-size: 11px; }
+            h2 { margin: 0 0 5px 0; }
+            .info { font-size: 0.85em; color: #666; margin-bottom: 10px; }
+            table { width: 100%; border-collapse: collapse; }
+            th { background: #28a745; color: white; padding: 6px 8px; border: 1px solid #ccc; text-align: left; }
+        </style></head><body>
+        <h2>納品予定表（発注DB）</h2>
+        <div class="info">印刷日時: ${now} ／ 期間: ${data.start_date} ～ ${data.end_date} ／ 合計: ${data.total}件</div>
+        <table>
+            <thead><tr>
+                <th>納期</th><th>製番</th><th>仕入先</th><th>品名</th><th>仕様１</th><th>手配区分</th><th>数量</th><th>発注番号</th>
+            </tr></thead>
+            <tbody>${tableRows}</tbody>
+        </table>
+        <script>window.onload = function() { window.print(); window.close(); };</script>
+    </body></html>`);
+    printWindow.document.close();
+}

@@ -2453,6 +2453,21 @@ def across_db_seiban_status(seiban):
         return jsonify({'success': False, 'error': str(e)})
 
 
+@app.route('/api/across-db/delivery-schedule')
+def across_db_delivery_schedule():
+    """発注DBから納品予定を取得"""
+    try:
+        start_date = request.args.get('start_date', None)
+        days = int(request.args.get('days', 7))
+        seibans_str = request.args.get('seibans', '')
+        seibans = [s.strip() for s in seibans_str.split(',') if s.strip()] if seibans_str else None
+
+        result = across_db.get_delivery_schedule_from_db(start_date, days, seibans)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
 @app.route('/api/across-db/columns')
 def across_db_columns():
     """ビューのカラム一覧取得"""

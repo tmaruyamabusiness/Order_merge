@@ -427,10 +427,27 @@
             <div id="receiving-tab" class="tab-content">
                 <h2>📦 入荷管理</h2>
 
-                <!-- 納品予定表 -->
+                <!-- 納品予定表（発注DB直接取得） -->
+                <div class="card" style="margin-bottom: 20px; padding: 20px; background: white; border: 2px solid #28a745; border-radius: 10px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+                        <h3 style="margin: 0;">📅 納品予定 <span style="font-size: 0.7em; background: #28a745; color: white; padding: 2px 8px; border-radius: 10px; font-weight: normal;">発注DB</span></h3>
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                            <label style="font-size: 0.85em; color: #666; margin: 0;">開始日:</label>
+                            <input type="date" id="dbDeliveryStartDate" style="padding: 3px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 0.85em;">
+                            <button class="btn btn-sm" onclick="resetDbDeliveryDate()" style="padding: 3px 10px; border: 1px solid #ced4da; background: #f8f9fa; font-size: 0.82em; border-radius: 4px; cursor: pointer;" title="今日に戻す">今日</button>
+                            <button class="btn btn-sm btn-success" onclick="loadDbDeliverySchedule()">🔄 DB読込</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="printDbDeliverySchedule()" style="border: 1px solid #6c757d; background: white;">🖨 印刷</button>
+                        </div>
+                    </div>
+                    <div id="dbDeliveryScheduleContent">
+                        <p style="text-align: center; padding: 20px; color: #6c757d;">「DB読込」ボタンを押して発注DBから納品予定を読み込みます</p>
+                    </div>
+                </div>
+
+                <!-- 納品予定表（ローカル） -->
                 <div class="card" style="margin-bottom: 20px; padding: 20px; background: white; border: 1px solid #dee2e6; border-radius: 10px;">
                     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
-                        <h3 style="margin: 0;">📅 納品予定</h3>
+                        <h3 style="margin: 0;">📅 納品予定 <span style="font-size: 0.7em; color: #6c757d; font-weight: normal;">(ローカル)</span></h3>
                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                             <label style="font-size: 0.85em; color: #666; margin: 0;">開始日:</label>
                             <input type="date" id="deliveryStartDate" style="padding: 3px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 0.85em;" onchange="loadDeliverySchedule()">
