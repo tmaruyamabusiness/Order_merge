@@ -3688,9 +3688,6 @@ def get_order_details(order_id):
 
         details = []
         for detail in order.details:
-            # 🔥 CAD図面情報を取得
-            cad_info = get_cad_file_info(detail.spec1)
-
             # 🔥 検収データを取得
             delivery_info = DeliveryUtils.get_delivery_info(detail.order_number, delivery_dict)
 
@@ -3713,19 +3710,10 @@ def get_order_details(order_id):
                 'parent_id': detail.parent_id,  # 🔥 親子関係を追加
                 # 🔥 検収データを追加
                 'received_delivery_date': delivery_info.get('納入日', ''),
-                'received_delivery_qty': delivery_info.get('納入数', 0)
+                'received_delivery_qty': delivery_info.get('納入数', 0),
+                # CAD情報は遅延ロード（/api/detail/{id}/cad-info で取得）
+                'cad_info': None
             }
-
-            # 🔥 CAD情報を追加
-            if cad_info:
-                detail_dict['cad_info'] = {
-                    'has_pdf': cad_info['has_pdf'],
-                    'has_mx2': cad_info['has_mx2'],
-                    'pdf_count': len(cad_info['pdf_files']),
-                    'mx2_count': len(cad_info['mx2_files'])
-                }
-            else:
-                detail_dict['cad_info'] = None
 
             details.append(detail_dict)
         
@@ -3938,6 +3926,31 @@ def get_detail_logs(detail_id):
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/detail/<int:detail_id>/cad-info')
+def get_detail_cad_info(detail_id):
+    """詳細アイテムのCADファイル情報を取得（遅延ロード用）"""
+    try:
+        detail = OrderDetail.query.get_or_404(detail_id)
+        cad_info = get_cad_file_info(detail.spec1)
+
+        if cad_info:
+            return jsonify({
+                'success': True,
+                'cad_info': {
+                    'has_pdf': cad_info['has_pdf'],
+                    'has_mx2': cad_info['has_mx2'],
+                    'pdf_count': len(cad_info['pdf_files']),
+                    'mx2_count': len(cad_info['mx2_files'])
+                }
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'cad_info': None
+            })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/check-update')
 def check_update():
