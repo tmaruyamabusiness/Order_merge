@@ -3850,14 +3850,15 @@ def toggle_receive_detail(detail_id):
         )
         db.session.add(log)
         
-        # 注文全体のステータスを更新
+        # 注文全体のステータスを更新（1回のループで計算）
         order = detail.order
-        all_received = all(d.is_received for d in order.details)
-        any_received = any(d.is_received for d in order.details)
-        
-        if all_received:
+        details_list = order.details
+        total_count = len(details_list)
+        received_count = sum(1 for d in details_list if d.is_received)
+
+        if received_count == total_count:
             order.status = '納品完了'
-        elif any_received:
+        elif received_count > 0:
             order.status = '納品中'
         else:
             order.status = '受入準備前'
@@ -4239,10 +4240,14 @@ def receive_by_purchase_order():
             orders_to_update.add(detail.order)
         
         for order in orders_to_update:
-            all_received = all(d.is_received for d in order.details)
-            if all_received:
+            # 1回のループで計算（二重ループ解消）
+            details_list = order.details
+            total_count = len(details_list)
+            order_received_count = sum(1 for d in details_list if d.is_received)
+
+            if order_received_count == total_count:
                 order.status = '納品完了'
-            elif any(d.is_received for d in order.details):
+            elif order_received_count > 0:
                 order.status = '納品中'
         
         db.session.commit()
