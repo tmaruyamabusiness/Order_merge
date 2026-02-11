@@ -15,14 +15,9 @@ from openpyxl.worksheet.page import PageMargins
 from app import db, Order, OrderDetail
 from utils import Constants, DataUtils, MekkiUtils, ExcelStyler, generate_qr_code, create_gantt_chart_sheet, DeliveryUtils
 
-# 更新対象のExcelファイル一覧（DB直接クエリに移行中）
-EXCEL_FILES_TO_REFRESH = [
-    {
-        'path': r"\\SERVER3\share-data\Document\Acrossデータ\製番一覧表.xlsx",
-        'name': '製番一覧表',
-        'sheet': '製番'
-    }
-]
+# 更新対象のExcelファイル一覧
+# 製番一覧表はV_D受注DBから直接取得するため、リストから削除
+EXCEL_FILES_TO_REFRESH = []
 
 
 def get_order_excel_filename(seiban, product_name=None, customer_abbr=None):
