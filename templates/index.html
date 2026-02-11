@@ -1786,12 +1786,18 @@
                 const label = document.createElement('label');
                 label.className = 'seiban-cb-label';
                 label.style.cssText = 'display: flex; align-items: center; padding: 4px 6px; cursor: pointer; border-radius: 4px; gap: 8px;';
+                // 検索用にすべての情報を含める
+                const searchText = `${item.seiban} ${item.product_name || ''} ${item.customer_abbr || ''} ${item.memo2 || ''}`.toLowerCase();
+                label.setAttribute('data-search', searchText);
                 label.setAttribute('data-seiban', item.seiban.toLowerCase());
+                // memo2があれば表示
+                const memo2Html = item.memo2 ? `<span style="color: #17a2b8; font-size: 0.8em; white-space: nowrap;">${item.memo2}</span>` : '';
                 label.innerHTML = `
                     <input type="checkbox" class="seiban-cb" value="${item.seiban}" onchange="onSeibanCheckChange()" style="width: 18px; height: 18px; flex-shrink: 0;">
                     <span style="font-weight: bold; white-space: nowrap;">${item.seiban}</span>
                     <span style="color: #555; font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${item.product_name}</span>
-                    <span style="color: #888; font-size: 0.85em; white-space: nowrap;">(${item.customer_abbr})</span>`;
+                    <span style="color: #888; font-size: 0.85em; white-space: nowrap;">(${item.customer_abbr})</span>
+                    ${memo2Html}`;
                 label.addEventListener('mouseenter', () => label.style.background = '#f0f0f0');
                 label.addEventListener('mouseleave', () => label.style.background = '');
                 listDiv.appendChild(label);
@@ -1799,12 +1805,12 @@
             updateSeibanCheckCount();
         }
 
-        // 絞り込み
+        // 絞り込み（製番・品名・顧客名・メモ２で検索）
         function filterSeibanCheckboxes() {
             const filter = document.getElementById('seibanFilterInput').value.toLowerCase();
             document.querySelectorAll('.seiban-cb-label').forEach(label => {
-                const seiban = label.getAttribute('data-seiban');
-                label.style.display = seiban.includes(filter) ? 'flex' : 'none';
+                const searchText = label.getAttribute('data-search') || label.getAttribute('data-seiban');
+                label.style.display = searchText.includes(filter) ? 'flex' : 'none';
             });
         }
 

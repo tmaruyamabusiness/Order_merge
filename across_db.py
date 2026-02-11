@@ -16,6 +16,7 @@ AVAILABLE_VIEWS = {
     'V_D手配リスト': '手配リスト（BOM・部品表）',
     'V_D仕入': '仕入データ（納入実績）',
     'V_D未発注': '未発注データ（社内加工品含む）',
+    'V_D受注': '受注データ（製番・品名・顧客名など）',
 }
 
 # DSN接続設定
@@ -1173,3 +1174,67 @@ def get_seiban_updates(seiban):
         if conn:
             conn.close()
 
+
+def get_seiban_list_from_db(min_seiban=None):
+    """
+    V_D受注から製番一覧を取得（製番選択ドロップダウン用）
+
+    Args:
+        min_seiban: 最小製番（この番号以降を取得、例: 'MHT0600'）
+
+    Returns:
+        dict: {
+            'success': bool,
+            'items': [{'seiban': str, 'product_name': str, 'customer_name': str, 'memo2': str}, ...],
+            'count': int
+        }
+    """
+    conn = None
+    try:
+        conn, cursor = get_connection()
+
+        # V_D受注から製番・品名・顧客名（まとめ区分２）・メモ２を取得
+        # 製番ごとに1件のみ（重複除去）
+        sql = """
+            SELECT DISTINCT
+                製番,
+                品名,
+                まとめ区分２,
+                メモ２
+            FROM dbo.[V_D受注]
+            WHERE 製番 IS NOT NULL AND 製番 <> ''
+        """
+        params = []
+
+        # 最小製番フィルタ
+        if min_seiban:
+            sql += " AND 製番 >= ?"
+            params.append(min_seiban.strip())
+
+        sql += " ORDER BY 製番 DESC"
+
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+
+        items = []
+        for row in rows:
+            seiban = format_value(row[0])
+            if not seiban:
+                continue
+            items.append({
+                'seiban': seiban,
+                'product_name': format_value(row[1]) or '',
+                'customer_name': format_value(row[2]) or '',
+                'memo2': format_value(row[3]) or ''
+            })
+
+        return {
+            'success': True,
+            'items': items,
+            'count': len(items)
+        }
+    except Exception as e:
+        return {'success': False, 'error': str(e), 'items': []}
+    finally:
+        if conn:
+            conn.close()

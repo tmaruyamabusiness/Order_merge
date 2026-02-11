@@ -1637,24 +1637,50 @@ def check_network_file_with_diff():
 
 @app.route('/api/seiban-list', methods=['GET'])
 def get_seiban_list():
-    """製番一覧表から製番リストを取得（ドロップダウン用）"""
+    """製番一覧を取得（V_D受注から直接取得）"""
     try:
-        seiban_info = load_seiban_info()
-        if not seiban_info:
-            return jsonify({'success': False, 'error': '製番一覧表を読み込めません', 'items': []})
+        min_seiban = request.args.get('min_seiban')
+        source = request.args.get('source', 'db')  # デフォルトはDB
 
-        items = []
-        for seiban, info in seiban_info.items():
-            items.append({
-                'seiban': seiban,
-                'product_name': info.get('product_name', ''),
-                'customer_abbr': info.get('customer_abbr', '')
-            })
+        if source == 'db':
+            # V_D受注から直接取得
+            result = across_db.get_seiban_list_from_db(min_seiban)
+            if result['success']:
+                # UIとの互換性のためcustomer_nameをcustomer_abbrにマッピング
+                items = []
+                for item in result['items']:
+                    items.append({
+                        'seiban': item['seiban'],
+                        'product_name': item['product_name'],
+                        'customer_abbr': item['customer_name'],  # まとめ区分２
+                        'memo2': item.get('memo2', '')
+                    })
+                return jsonify({
+                    'success': True,
+                    'items': items,
+                    'count': len(items),
+                    'source': 'V_D受注'
+                })
+            else:
+                return jsonify({'success': False, 'error': result.get('error', 'DB取得エラー'), 'items': []})
+        else:
+            # 従来のExcel読み込み（フォールバック）
+            seiban_info = load_seiban_info()
+            if not seiban_info:
+                return jsonify({'success': False, 'error': '製番一覧表を読み込めません', 'items': []})
 
-        # 製番の降順でソート（新しいものが上）
-        items.sort(key=lambda x: x['seiban'], reverse=True)
+            items = []
+            for seiban, info in seiban_info.items():
+                items.append({
+                    'seiban': seiban,
+                    'product_name': info.get('product_name', ''),
+                    'customer_abbr': info.get('customer_abbr', '')
+                })
 
-        return jsonify({'success': True, 'items': items, 'count': len(items)})
+            # 製番の降順でソート（新しいものが上）
+            items.sort(key=lambda x: x['seiban'], reverse=True)
+
+            return jsonify({'success': True, 'items': items, 'count': len(items), 'source': 'Excel'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e), 'items': []})
 
