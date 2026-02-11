@@ -1,1 +1,3 @@
-Nothing should be ignored based on the provided file changes. The modified files (`app.py` and `utils/constants.py`) are source code files that should not be ignored.__pycache__/
+__pycache__/
+*.pyc
+*.pyo
