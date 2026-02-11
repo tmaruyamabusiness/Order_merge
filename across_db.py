@@ -1193,13 +1193,13 @@ def get_seiban_list_from_db(min_seiban=None):
     try:
         conn, cursor = get_connection()
 
-        # V_D受注から製番・品名・顧客名（まとめ区分２）・メモ２を取得
+        # V_D受注から製番・品名・得意先略称・メモ２を取得
         # 製番ごとに1件のみ（重複除去）
         sql = """
             SELECT DISTINCT
                 製番,
                 品名,
-                まとめ区分２,
+                得意先略称,
                 メモ２
             FROM dbo.[V_D受注]
             WHERE 製番 IS NOT NULL AND 製番 <> ''
