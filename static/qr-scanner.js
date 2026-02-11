@@ -503,26 +503,9 @@ async function autoReceiveByOrderNumber(orderNumber) {
         }
 
         if (unreceived.length === 1) {
-            // 単一アイテム → 自動受入（ポップアップなし）
+            // 単一アイテム → 確認ポップアップを表示
             const detail = unreceived[0];
-            const receiveResponse = await fetch(`/api/detail/${detail.id}/toggle-receive`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ is_received: true })
-            });
-            const receiveData = await receiveResponse.json();
-
-            if (receiveData.success) {
-                playBeep(true);
-                if (navigator.vibrate) navigator.vibrate(CONFIG.VIBRATION_PATTERN);
-                showScannerToast(`✅ 受入完了: ${orderNumber}（${detail.item_name || ''})`, 'success');
-                processedOrderNumbers.add(orderNumber);
-                addScanLogEntry(orderNumber, detail, 'received');
-            } else {
-                showScannerToast(`❌ 受入失敗: ${orderNumber}`, 'error');
-                playBeep(false);
-            }
-            resumeScanning();
+            showReceiveConfirmPopup(orderNumber, detail);
             return;
         }
 
@@ -557,6 +540,118 @@ function showScannerToast(message, type) {
         border-radius:8px; padding:8px 14px; font-size:1em; font-weight:bold;
         animation: toastFadeIn 0.2s ease-out;
     ">${message}</div>`;
+}
+
+// ========================================
+// 受入確認ポップアップ（単一アイテム用）
+// ========================================
+function showReceiveConfirmPopup(orderNumber, detail) {
+    const modalBody = document.getElementById('barcodeReceiveModalBody');
+
+    const html = `
+        <div style="text-align: center; margin-bottom: 15px;">
+            <h3 style="margin: 0; color: #333;">受入確認</h3>
+            <p style="color: #6c757d; margin: 5px 0; font-size:0.9em;">以下の内容でよろしいですか？</p>
+        </div>
+        <div style="background: #f8f9fa; border: 2px solid #007bff; border-radius: 10px; padding: 15px; margin-bottom: 15px;">
+            <table style="width: 100%; font-size: 0.95em; border-collapse: collapse;">
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="font-weight:bold; padding: 8px 0; width: 90px; color: #495057;">発注番号:</td>
+                    <td style="padding: 8px 0; font-size: 1.1em;"><strong>${orderNumber}</strong></td>
+                </tr>
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="font-weight:bold; padding: 8px 0; color: #495057;">製番:</td>
+                    <td style="padding: 8px 0;">${detail.seiban || '-'}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="font-weight:bold; padding: 8px 0; color: #495057;">ユニット名:</td>
+                    <td style="padding: 8px 0;">${detail.unit || '-'}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="font-weight:bold; padding: 8px 0; color: #495057;">品名:</td>
+                    <td style="padding: 8px 0;">${detail.item_name || '-'}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="font-weight:bold; padding: 8px 0; color: #495057;">仕様1:</td>
+                    <td style="padding: 8px 0;">${detail.spec1 || '-'}</td>
+                </tr>
+                <tr>
+                    <td style="font-weight:bold; padding: 8px 0; color: #495057;">個数:</td>
+                    <td style="padding: 8px 0; font-size: 1.1em;"><strong>${detail.quantity || '-'} ${detail.unit_measure || ''}</strong></td>
+                </tr>
+            </table>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn btn-success" id="confirmReceiveBtn" onclick="executeConfirmedReceive(${detail.id}, '${orderNumber}')"
+                    style="flex: 1; padding: 12px; font-size: 1.1em; font-weight: bold;">
+                ✅ 受入する
+            </button>
+            <button class="btn btn-secondary" onclick="cancelReceiveAndResume()"
+                    style="flex: 1; padding: 12px; font-size: 1em;">
+                キャンセル
+            </button>
+        </div>
+    `;
+
+    modalBody.innerHTML = html;
+    document.getElementById('barcodeReceiveModal').classList.add('show');
+}
+
+// ========================================
+// 確認済み受入処理を実行
+// ========================================
+async function executeConfirmedReceive(detailId, orderNumber) {
+    const btn = document.getElementById('confirmReceiveBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '処理中...'; }
+
+    try {
+        const response = await fetch(`/api/detail/${detailId}/toggle-receive`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_received: true })
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            playBeep(true);
+            if (navigator.vibrate) navigator.vibrate(CONFIG.VIBRATION_PATTERN);
+            showScannerToast(`✅ 受入完了: ${orderNumber}`, 'success');
+            processedOrderNumbers.add(orderNumber);
+
+            // ポップアップを更新
+            const modalBody = document.getElementById('barcodeReceiveModalBody');
+            modalBody.innerHTML = `
+                <div style="text-align: center; padding: 30px;">
+                    <div style="font-size: 3em; margin-bottom: 15px;">✅</div>
+                    <h3 style="color: #28a745; margin-bottom: 10px;">受入完了</h3>
+                    <p style="color: #6c757d; font-size: 0.95em;">発注番号: ${orderNumber}</p>
+                </div>
+            `;
+
+            // 1.5秒後に自動でスキャンに戻る
+            setTimeout(() => {
+                closeBarcodeReceiveAndResume();
+            }, CONFIG.AUTO_RESUME_MS);
+        } else {
+            if (btn) { btn.disabled = false; btn.textContent = '✅ 受入する'; }
+            showScannerToast(`❌ 受入失敗: ${orderNumber}`, 'error');
+            playBeep(false);
+        }
+    } catch (error) {
+        console.error('受入エラー:', error);
+        if (btn) { btn.disabled = false; btn.textContent = '✅ 受入する'; }
+        showScannerToast(`❌ エラー: ${orderNumber}`, 'error');
+        playBeep(false);
+    }
+}
+
+// ========================================
+// 受入キャンセルしてスキャン再開
+// ========================================
+function cancelReceiveAndResume() {
+    document.getElementById('barcodeReceiveModal').classList.remove('show');
+    showScannerToast('キャンセルしました', 'info');
+    resumeScanning();
 }
 
 // ========================================
