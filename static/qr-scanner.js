@@ -618,20 +618,33 @@ async function executeConfirmedReceive(detailId, orderNumber) {
             showScannerToast(`✅ 受入完了: ${orderNumber}`, 'success');
             processedOrderNumbers.add(orderNumber);
 
-            // ポップアップを更新
+            // ポップアップを更新（カウントダウン付き）
             const modalBody = document.getElementById('barcodeReceiveModalBody');
+            let countdown = 3;
             modalBody.innerHTML = `
                 <div style="text-align: center; padding: 30px;">
                     <div style="font-size: 3em; margin-bottom: 15px;">✅</div>
                     <h3 style="color: #28a745; margin-bottom: 10px;">受入完了</h3>
                     <p style="color: #6c757d; font-size: 0.95em;">発注番号: ${orderNumber}</p>
+                    <p id="countdownText" style="color: #6c757d; font-size: 0.9em; margin-top: 15px;">${countdown}秒後に自動でスキャン画面に戻ります</p>
+                    <button class="btn" onclick="cancelAutoResume()" style="background: #ffc107; color: #000; padding: 10px 30px; font-size: 1em; margin-top: 10px; font-weight: bold;">
+                        🟨 キャンセル
+                    </button>
                 </div>
             `;
 
-            // 1.5秒後に自動でスキャンに戻る
-            setTimeout(() => {
-                closeBarcodeReceiveAndResume();
-            }, CONFIG.AUTO_RESUME_MS);
+            // カウントダウンタイマー
+            window.autoResumeTimer = setInterval(() => {
+                countdown--;
+                const countdownEl = document.getElementById('countdownText');
+                if (countdownEl) {
+                    countdownEl.textContent = `${countdown}秒後に自動でスキャン画面に戻ります`;
+                }
+                if (countdown <= 0) {
+                    clearInterval(window.autoResumeTimer);
+                    closeBarcodeReceiveAndResume();
+                }
+            }, 1000);
         } else {
             if (btn) { btn.disabled = false; btn.textContent = '✅ 受入する'; }
             showScannerToast(`❌ 受入失敗: ${orderNumber}`, 'error');
@@ -890,21 +903,58 @@ async function executeAllBarcodeReceive(orderNumber, detailIds) {
         processedOrderNumbers.add(orderNumber);
     }
 
-    if (allBtn) {
-        allBtn.textContent = `${successCount}/${detailIds.length}件 受入完了`;
-        allBtn.style.background = '#6c757d';
-    }
+    // ポップアップを更新（カウントダウン付き）
+    const modalBody = document.getElementById('barcodeReceiveModalBody');
+    let countdown = 3;
+    modalBody.innerHTML = `
+        <div style="text-align: center; padding: 30px;">
+            <div style="font-size: 3em; margin-bottom: 15px;">✅</div>
+            <h3 style="color: #28a745; margin-bottom: 10px;">受入完了</h3>
+            <p style="color: #6c757d; font-size: 0.95em;">${successCount}/${detailIds.length}件 受入完了</p>
+            <p style="color: #6c757d; font-size: 0.95em;">発注番号: ${orderNumber}</p>
+            <p id="countdownText" style="color: #6c757d; font-size: 0.9em; margin-top: 15px;">${countdown}秒後に自動でスキャン画面に戻ります</p>
+            <button class="btn" onclick="cancelAutoResume()" style="background: #ffc107; color: #000; padding: 10px 30px; font-size: 1em; margin-top: 10px; font-weight: bold;">
+                🟨 キャンセル
+            </button>
+        </div>
+    `;
 
-    // 1.5秒後に自動でスキャンに戻る
-    setTimeout(() => {
-        closeBarcodeReceiveAndResume();
-    }, CONFIG.AUTO_RESUME_MS);
+    // カウントダウンタイマー
+    window.autoResumeTimer = setInterval(() => {
+        countdown--;
+        const countdownEl = document.getElementById('countdownText');
+        if (countdownEl) {
+            countdownEl.textContent = `${countdown}秒後に自動でスキャン画面に戻ります`;
+        }
+        if (countdown <= 0) {
+            clearInterval(window.autoResumeTimer);
+            closeBarcodeReceiveAndResume();
+        }
+    }, 1000);
+}
+
+// ========================================
+// 自動復帰をキャンセル
+// ========================================
+function cancelAutoResume() {
+    if (window.autoResumeTimer) {
+        clearInterval(window.autoResumeTimer);
+        window.autoResumeTimer = null;
+    }
+    const countdownEl = document.getElementById('countdownText');
+    if (countdownEl) {
+        countdownEl.textContent = '自動復帰をキャンセルしました';
+    }
 }
 
 // ========================================
 // バーコード受入モーダルを閉じてスキャン再開
 // ========================================
 function closeBarcodeReceiveAndResume() {
+    if (window.autoResumeTimer) {
+        clearInterval(window.autoResumeTimer);
+        window.autoResumeTimer = null;
+    }
     document.getElementById('barcodeReceiveModal').classList.remove('show');
     resumeScanning();
 }

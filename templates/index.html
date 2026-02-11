@@ -536,31 +536,6 @@
                     </div>
                 </div>
 
-                <!-- 仕様１での検索 -->
-                <div class="card" style="margin-bottom: 20px; padding: 20px; background: #e8f4ff; border-radius: 10px;">
-                    <h3>🔍 仕様１（型番）で検索</h3>
-                    <div class="form-group">
-                        <label>仕様１を入力:</label>
-                        <div style="display: flex; gap: 10px;">
-                            <input type="text" id="spec1Input" placeholder="例: MVBLK-SSM-3RP-GDKZG" style="flex: 1;">
-                            <button class="btn btn-primary" onclick="searchBySpec1()">検索</button>
-                        </div>
-                    </div>
-                    <div id="spec1SearchResult"></div>
-                </div>
-                
-                <!-- 発注番号統計 -->
-                <div class="card" style="margin-bottom: 20px; padding: 20px; background: #e8f4f8; border-radius: 10px;">
-                    <h3>📊 発注番号別進捗</h3>
-                    <button class="btn btn-primary" onclick="loadPurchaseOrderStats()">統計を更新</button>
-                    <div id="purchaseOrderStats" style="margin-top: 20px;"></div>
-                </div>
-                
-                <!-- 既存の受入リスト -->
-                <div class="card" style="padding: 20px; background: white; border: 1px solid #dee2e6; border-radius: 10px;">
-                    <h3>📋 製番別受入リスト</h3>
-                    <div id="receivingList"></div>
-                </div>
             </div>
 
             <script>
@@ -1204,13 +1179,6 @@
                 }
             }
 
-
-            // 仕様1入力でEnterキー対応
-            document.getElementById('spec1Input').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') {
-                    searchBySpec1();
-                }
-            });
 
             // 🔥 発注番号入力でEnterキー対応（バーコードスキャン後の受入確認）
             document.getElementById('purchaseOrderInput').addEventListener('keypress', function(e) {
