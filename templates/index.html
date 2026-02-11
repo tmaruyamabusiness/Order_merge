@@ -3105,33 +3105,19 @@
                     const escapeHtml = (str) => (str || '').replace(/'/g, "\\'");
                     const parentItems = details.filter(d => !d.parent_id);
 
-                    // 🔥 仕様1のCADリンク表示を生成する関数
+                    // 🔥 仕様1のCADリンク表示を生成する関数（CAD情報は遅延ロード）
                     const getSpec1Html = (detail) => {
                         const spec1 = detail.spec1 || '-';
-                        if (!detail.cad_info) {
-                            return spec1;
+                        // Nで始まる仕様1はCADファイルがある可能性があるのでリンク化
+                        if (spec1.startsWith('N')) {
+                            return `
+                                <a href="#" class="cad-link" data-detail-id="${detail.id}"
+                                   style="color: #007bff; text-decoration: underline; cursor: pointer;">
+                                    ${spec1}
+                                </a>
+                            `;
                         }
-
-                        let fileInfo = '';
-                        let warningText = '';
-
-                        if (detail.cad_info.has_pdf) {
-                            fileInfo = `📄 PDF有 (${detail.cad_info.pdf_count}件)`;
-                        } else if (detail.cad_info.has_mx2) {
-                            fileInfo = `🔧 mx2のみ (${detail.cad_info.mx2_count}件)`;
-                            warningText = '<div style="font-size: 0.75em; color: #856404;">⚠️ iCAD MX導入PCのみ</div>';
-                        }
-
-                        return `
-                            <a href="#" class="cad-link" data-detail-id="${detail.id}"
-                               style="color: #007bff; text-decoration: underline; cursor: pointer;">
-                                ${spec1}
-                            </a>
-                            <div style="font-size: 0.8em; color: ${detail.cad_info.has_pdf ? '#28a745' : '#856404'}; margin-top: 3px;">
-                                ${fileInfo}
-                                ${warningText}
-                            </div>
-                        `;
+                        return spec1;
                     };
 
                     parentItems.forEach(parent => {
