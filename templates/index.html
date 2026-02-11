@@ -2075,15 +2075,16 @@
             const progressLog = document.getElementById('batchProgressLog');
             container.style.display = 'block';
             progressLog.innerHTML = '';
+            // 進捗バーを0%にリセット
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+            progressTitle.textContent = `🗄️ DB直接一括処理中... (0/${seibans.length})`;
 
             let successCount = 0;
             let failCount = 0;
 
             for (let i = 0; i < seibans.length; i++) {
                 const seiban = seibans[i];
-                const pct = Math.round(((i + 1) / seibans.length) * 100);
-                progressBar.style.width = pct + '%';
-                progressBar.textContent = pct + '%';
                 progressTitle.textContent = `🗄️ DB直接一括処理中... (${i + 1}/${seibans.length})`;
 
                 try {
@@ -2104,6 +2105,10 @@
                     failCount++;
                     progressLog.innerHTML += '<div style="color:red;">✗ ' + seiban + ': ' + e + '</div>';
                 }
+                // 処理完了後に進捗バーを更新
+                const pct = Math.round(((i + 1) / seibans.length) * 100);
+                progressBar.style.width = pct + '%';
+                progressBar.textContent = pct + '%';
             }
 
             progressTitle.textContent = `🗄️ DB直接一括処理完了: 成功 ${successCount}件 / 失敗 ${failCount}件`;
