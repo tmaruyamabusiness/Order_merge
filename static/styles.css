@@ -376,6 +376,10 @@
         
 
 
+        body.modal-open {
+            overflow: hidden;
+        }
+
         .modal {
             display: none;
             position: fixed;
@@ -405,6 +409,7 @@
             max-height: 90vh;
             overflow-y: auto;
             touch-action: pan-y;
+            overscroll-behavior: contain;
             animation: slideIn 0.3s;
         }
 
