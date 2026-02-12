@@ -243,6 +243,169 @@ class EditLog(db.Model):
     timestamp = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     user_agent = db.Column(db.String(500))
 
+
+class PartCategory(db.Model):
+    """部品分類記号マスタテーブル - N**-形式の部品番号の分類情報"""
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(10), unique=True, nullable=False, index=True)  # NAA, NAB, NFA等（3文字）
+    major_category = db.Column(db.String(50))   # 大分類
+    minor_category = db.Column(db.String(50))   # 小分類
+    note = db.Column(db.String(500))            # 補足
+
+    @classmethod
+    def get_category_info(cls, part_code):
+        """部品コードから分類情報を取得（NAA-00123-01-00 → NAA で検索）"""
+        if not part_code or len(part_code) < 3:
+            return None
+        category_code = part_code[:3].upper()
+        return cls.query.filter_by(code=category_code).first()
+
+    @classmethod
+    def parse_part_number(cls, part_code):
+        """部品番号をパースして詳細情報を返す
+        形式: NAA-00000-00-00
+              ^^^-^^^^^-^^-^^
+              分類-シリアル-派生-リビジョン
+        """
+        if not part_code:
+            return None
+
+        parts = part_code.split('-')
+        if len(parts) < 1:
+            return None
+
+        result = {
+            'category_code': parts[0] if len(parts) > 0 else None,
+            'serial': parts[1] if len(parts) > 1 else None,
+            'derivative': parts[2] if len(parts) > 2 else None,
+            'revision': parts[3] if len(parts) > 3 else None,
+        }
+
+        # 分類情報を取得
+        if result['category_code']:
+            category = cls.query.filter_by(code=result['category_code']).first()
+            if category:
+                result['major_category'] = category.major_category
+                result['minor_category'] = category.minor_category
+                result['note'] = category.note
+
+        return result
+
+
+# 分類記号マスタの初期データ
+PART_CATEGORY_INITIAL_DATA = [
+    ('NAA', '角ブロック', 'スペーサブロック', '主に角型ブロック（円筒形状中心穴はカラー）'),
+    ('NAB', '角ブロック', 'スライドブロック', ''),
+    ('NAC', '角ブロック', '本体ブロック', '角ストッパー含む'),
+    ('NAD', '角ブロック', 'ねじブロック', ''),
+    ('NAE', '角ブロック', '充填機シール板', ''),
+    ('NAF', '角ブロック', 'ブロックダイ', ''),
+    ('NBA', 'ばね', '板', ''),
+    ('NBB', 'ばね', 'コイル', ''),
+    ('NBC', 'ばね', 'トーション', ''),
+    ('NBD', 'ばね', 'さらばね', ''),
+    ('NCA', '架台／フレーム', '製缶', 'ユニット用サブ架台含む'),
+    ('NCB', '架台／フレーム', '鋳物', ''),
+    ('NCC', '架台／フレーム', '板金', ''),
+    ('NCD', '架台／フレーム', '型鋼・パイプ', ''),
+    ('NDA', 'ベース板/プレート', 'ｔ６以上', '一枚板で曲げ加工等無い物で、溶接等で他の部品が付いても良い'),
+    ('NDB', 'ベース板/プレート', 't６未満', ''),
+    ('NDC', 'ベース板/プレート', 'ｔ６以上', '一枚板で曲げ加工した物、溶接等で他の部品が付いても良い'),
+    ('NDD', 'ベース板/プレート', 't６未満', ''),
+    ('NDE', 'ベース板/プレート', 'フレキシブル刃', ''),
+    ('NDF', 'ベース板/プレート', 'トムソン刃', ''),
+    ('NEA', '配管／ホッパー', '一般配管', '空油圧'),
+    ('NEB', '配管／ホッパー', 'サニタリー配管', ''),
+    ('NEC', '配管／ホッパー', '配管保護', ''),
+    ('NED', '配管／ホッパー', 'ホッパー', ''),
+    ('NEE', '配管／ホッパー', 'ダクト', ''),
+    ('NFA', 'シリンダ', 'チューブ', 'ヘッド側・ロッド側カバー一体含む'),
+    ('NFB', 'シリンダ', 'ヘッド側・ロッド側カバー', '単体'),
+    ('NFC', 'シリンダ', 'ピストン', 'ロッド一体含む'),
+    ('NFD', 'シリンダ', 'エアピッカー', ''),
+    ('NGA', 'カップリング', '製作物', ''),
+    ('NGB', 'カップリング', '購入品追加工', ''),
+    ('NGC', 'カップリング', '熱電対', ''),
+    ('NHA', 'マニホールド', '', '空油圧用'),
+    ('NIA', 'カバー・ガイド類', '金属', ''),
+    ('NIB', 'カバー・ガイド類', '樹脂', ''),
+    ('NIC', 'カバー・ガイド類', 'ハンドル', ''),
+    ('NID', 'カバー・ガイド類', '内袋製品図', ''),
+    ('NIE', 'カバー・ガイド類', 'PID外容器', '紙容器・パウチ・ホルダー・etc'),
+    ('NIF', 'カバー・ガイド類', '印刷データ', 'フィルム・紙容器・パウチ・ホルダー・etc'),
+    ('NJA', 'カム（ドグ類含む）', '円板カム', '円筒径方向がカム形状'),
+    ('NJB', 'カム（ドグ類含む）', '円筒カム', '円筒軸方向がカム形状'),
+    ('NJC', 'カム（ドグ類含む）', '板カム', '非回転型カム'),
+    ('NKA', '取付金具', '単品取付け用', 'モーター・センサー等'),
+    ('NKB', '取付金具', 'ユニット取付け用', ''),
+    ('NLA', 'キー', '固定キー', ''),
+    ('NLB', 'キー', 'すべりキー', ''),
+    ('NMA', 'ギア', '平。はすば歯車', '製作物・購入品追加工'),
+    ('NMB', 'ギア', '内歯車', ''),
+    ('NMC', 'ギア', 'ラック', ''),
+    ('NMD', 'ギア', 'マイタ・かさ・ハイポイド歯車', ''),
+    ('NME', 'ギア', 'ウォーム・ウォームホイール', ''),
+    ('NNA', '軸（円筒・多角形）', '支点ピン・固定ピン', '短尺物'),
+    ('NNB', '軸（円筒・多角形）', 'ストレート円筒軸', 'ピストンロッド含む(外径公差精度級）'),
+    ('NNC', '軸（円筒・多角形）', '回転用多段軸', '取付物回転含む'),
+    ('NND', '軸（円筒・多角形）', '丸棒・六角棒加工品', ''),
+    ('NNE', '軸（円筒・多角形）', 'テンションロッド', ''),
+    ('NNF', '軸（円筒・多角形）', 'パンチ', ''),
+    ('NOA', 'ねじ類', 'すべりねじ', 'JIS規格品含む'),
+    ('NOB', 'ねじ類', 'ボールねじ', ''),
+    ('NOC', 'ねじ類', 'スプライン', 'ボールスプライン含む'),
+    ('NPA', 'ナット', 'すべりねじ', 'JIS規格品含む'),
+    ('NPB', 'ナット', 'ボールねじナット（単独）', ''),
+    ('NPC', 'ナット', 'スプラインナット（単体）', 'ボールスプライン含む'),
+    ('NPD', 'ナット', '板ナット（複数穴含）', ''),
+    ('NQA', 'カラー/座金', '座金', '板厚＜外径'),
+    ('NQB', 'カラー/座金', 'カラー', '板厚≧外径'),
+    ('NRA', '軸受け関連', 'ケース', ''),
+    ('NRB', '軸受け関連', 'すべり軸受け', ''),
+    ('NRC', '軸受け関連', '転がり軸受け', ''),
+    ('NRD', '軸受け関連', 'ベアリングフタ／固定部品', ''),
+    ('NSA', 'プーリー／スプロケット', 'スプロケット', ''),
+    ('NSB', 'プーリー／スプロケット', '平プーリー', '面長＜外径'),
+    ('NSC', 'プーリー／スプロケット', 'タイミングプーリー', ''),
+    ('NSD', 'プーリー／スプロケット', 'Vプーリー', '丸ベルト用含む'),
+    ('NSE', 'プーリー／スプロケット', 'ローラー', '金属・ゴム・樹脂ローラー　面長＞外径'),
+    ('NSF', 'プーリー／スプロケット', 'コンベア', 'コンベア追加工'),
+    ('NTA', 'レバー・リンク・ロープ', 'レバー', ''),
+    ('NTB', 'レバー・リンク・ロープ', 'リンク', ''),
+    ('NTC', 'レバー・リンク・ロープ', 'ロープ', ''),
+    ('NUA', 'アーム類', 'アーム', ''),
+    ('NVA', 'フランジ類', 'フランジ', ''),
+    ('NWA', 'ブラシ類', '円筒形状', ''),
+    ('NWB', 'ブラシ類', '平、角形状', ''),
+    ('NXA', '銘板、刻印', '銘板', ''),
+    ('NXB', '銘板、刻印', '表示シール', ''),
+    ('NXC', '銘板、刻印', '刻印', ''),
+    ('NYA', '空圧・油圧回路図', '', ''),
+    ('NZA', '電気回路図', '', ''),
+    ('AAA', 'Type-VＡｓｓｙ図', '', ''),
+    ('AAB', 'Type-3アンプルカット改造', '', ''),
+    ('AAC', '紙エコパックシール機', '', ''),
+    ('AAD', 'Type-3アンプルカット改造', '', ''),
+    ('AAE', 'ＰＩＤ自動充填機ライン（久原）', '', ''),
+    ('AAF', 'PID小口生産システム', '', ''),
+    ('AAG', 'PID注出試験機', '', ''),
+    ('AAH', 'PID充填機W600(NEO)', '', ''),
+    ('AAI', 'Type-G大容量アンプルカット改造', '', ''),
+    ('AAJ', 'PIDパウチ半自動シール機', '', ''),
+    ('AAK', '袋切断機（W600)', '', ''),
+    ('AAL', 'CTカートン半自動シール機', '', ''),
+    ('AAM', 'FSS(充填支援システム)', '', ''),
+    ('AAN', 'CTパウチ半自動シール機', '', ''),
+    ('AAO', 'CTカートン自動化検証機', '', ''),
+    ('AAP', '小袋包装機', '', ''),
+    ('AAQ', 'オートスプライサー', '', ''),
+    ('AAR', 'SPG', '', ''),
+    ('AAS', 'ドラム冷却装置', '', ''),
+    ('AAT', '充填機用ポンプユニット', '', ''),
+    ('AAU', '配管洗浄機（STC）', '', ''),
+]
+
+
 # Initialize database
 with app.app_context():
     db.create_all()
@@ -254,6 +417,23 @@ with app.app_context():
         print("✓ reply_delivery_date カラムを追加しました")
     except Exception:
         pass  # 既に存在する場合は無視
+
+    # 分類記号マスタの初期データ投入
+    try:
+        if PartCategory.query.count() == 0:
+            for code, major, minor, note in PART_CATEGORY_INITIAL_DATA:
+                category = PartCategory(
+                    code=code,
+                    major_category=major,
+                    minor_category=minor,
+                    note=note
+                )
+                db.session.add(category)
+            db.session.commit()
+            print(f"✓ 分類記号マスタに{len(PART_CATEGORY_INITIAL_DATA)}件の初期データを投入しました")
+    except Exception as e:
+        print(f"分類記号マスタ初期化エラー: {e}")
+        db.session.rollback()
 
 def to_jst(utc_dt):
     """UTC時刻をJSTに変換"""
@@ -4583,6 +4763,81 @@ def get_pallet_stats():
 
 import subprocess
 import os
+
+
+# 🔥 部品分類記号API
+@app.route('/api/part-category/<part_code>')
+def get_part_category_api(part_code):
+    """部品コードから分類情報を取得するAPI
+    例: /api/part-category/NAA-00123-01-00
+    """
+    try:
+        parsed = PartCategory.parse_part_number(part_code)
+        if not parsed:
+            return jsonify({
+                'success': False,
+                'error': '無効な部品コード形式です'
+            }), 400
+
+        # 分類情報がある場合
+        if 'major_category' in parsed:
+            return jsonify({
+                'success': True,
+                'part_code': part_code,
+                'category_code': parsed['category_code'],
+                'serial': parsed['serial'],
+                'derivative': parsed['derivative'],
+                'revision': parsed['revision'],
+                'major_category': parsed.get('major_category', ''),
+                'minor_category': parsed.get('minor_category', ''),
+                'note': parsed.get('note', ''),
+                'description': {
+                    'serial': 'シリアル番号（00000～99999）',
+                    'derivative': '派生番号（同一形状・同一用途で+1）',
+                    'revision': 'リビジョン番号（出図後変更のたび+1）'
+                }
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'part_code': part_code,
+                'category_code': parsed['category_code'],
+                'serial': parsed['serial'],
+                'derivative': parsed['derivative'],
+                'revision': parsed['revision'],
+                'major_category': None,
+                'minor_category': None,
+                'note': None,
+                'warning': f'分類コード {parsed["category_code"]} はマスタに登録されていません'
+            })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/part-categories')
+def get_all_part_categories():
+    """全ての分類記号を取得するAPI（管理画面用）"""
+    try:
+        categories = PartCategory.query.order_by(PartCategory.code).all()
+        return jsonify({
+            'success': True,
+            'count': len(categories),
+            'categories': [{
+                'code': c.code,
+                'major_category': c.major_category,
+                'minor_category': c.minor_category,
+                'note': c.note
+            } for c in categories]
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 
 @app.route('/api/open-cad/<int:detail_id>')
 def open_cad_file(detail_id):
