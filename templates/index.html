@@ -2191,6 +2191,11 @@
                                     <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); exportSeiban('${seiban}')" title="製番全体をExcel出力" style="font-size: 0.85em; padding: 4px 8px;">
                                         📄 Excel出力
                                     </button>
+                                    ${group.derivatives && group.derivatives.length > 0 ? `
+                                    <button class="btn btn-info btn-sm" onclick="event.stopPropagation(); exportSeibanFamily('${seiban}')" title="枝番を含む全製番を1ファイルにまとめてExcel出力" style="font-size: 0.85em; padding: 4px 8px;">
+                                        📑 枝番統合出力
+                                    </button>
+                                    ` : ''}
                                     <button class="btn btn-success btn-sm" onclick="event.stopPropagation(); refreshSeiban('${seiban}')" title="この製番のデータを最新に更新" style="font-size: 0.85em; padding: 4px 8px;">
                                         🔄 更新
                                     </button>
@@ -2536,6 +2541,32 @@
                 async function exportSeiban(seiban) {
                     try {
                         window.location.href = `/api/export-seiban/${seiban}`;
+                    } catch (error) {
+                        showToast('出力エラー: ' + error, 'error');
+                    }
+                }
+
+                // 枝番ファミリー全体を1ファイルにまとめてExcel出力
+                async function exportSeibanFamily(seiban) {
+                    try {
+                        // 枝番ファミリー情報を取得して確認
+                        const response = await fetch(`/api/seiban-family/${seiban}`);
+                        const data = await response.json();
+
+                        if (!data.success) {
+                            showToast('エラー: ' + (data.error || '枝番情報の取得に失敗'), 'error');
+                            return;
+                        }
+
+                        const familyList = data.family.map(f => `${f.seiban} (${f.unit_count}ユニット, ${f.received_details}/${f.total_details}完了)`).join('\n');
+                        const confirmMsg = `以下の製番を1つのExcelファイルにまとめて出力します:\n\n${familyList}\n\n合計 ${data.total_seibans} 製番\n\n実行しますか？`;
+
+                        if (!confirm(confirmMsg)) {
+                            return;
+                        }
+
+                        window.location.href = `/api/export-seiban-family/${seiban}`;
+                        showToast('枝番統合Excelを出力中...', 'info');
                     } catch (error) {
                         showToast('出力エラー: ' + error, 'error');
                     }
