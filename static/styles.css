@@ -783,3 +783,202 @@
             transition: opacity 0.3s;
             pointer-events: none;
         }
+
+/* 🔥 部品分類ツールチップ（ホバー＆タッチ対応） */
+.part-category-tooltip {
+    position: fixed;
+    z-index: 10000;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: #fff;
+    border-radius: 12px;
+    padding: 16px 20px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+    max-width: 380px;
+    min-width: 280px;
+    font-size: 14px;
+    line-height: 1.5;
+    pointer-events: auto;
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.part-category-tooltip.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+.part-category-tooltip .tooltip-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.part-category-tooltip .tooltip-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #64b5f6;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.part-category-tooltip .tooltip-close {
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    color: #aaa;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.part-category-tooltip .tooltip-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+
+.part-category-tooltip .category-info {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 8px 16px;
+    margin-bottom: 14px;
+}
+
+.part-category-tooltip .info-label {
+    color: #90caf9;
+    font-weight: 500;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.part-category-tooltip .info-value {
+    color: #fff;
+    font-weight: 500;
+}
+
+.part-category-tooltip .info-value.highlight {
+    color: #ffd54f;
+    font-size: 15px;
+}
+
+.part-category-tooltip .part-breakdown {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 12px;
+}
+
+.part-category-tooltip .part-breakdown-title {
+    color: #81c784;
+    font-weight: 600;
+    font-size: 12px;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.part-category-tooltip .part-breakdown-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+}
+
+.part-category-tooltip .breakdown-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.part-category-tooltip .breakdown-label {
+    font-size: 11px;
+    color: #aaa;
+}
+
+.part-category-tooltip .breakdown-value {
+    font-family: 'Monaco', 'Consolas', monospace;
+    font-size: 14px;
+    color: #e0e0e0;
+}
+
+.part-category-tooltip .note-section {
+    margin-top: 12px;
+    padding: 10px;
+    background: rgba(255, 193, 7, 0.1);
+    border-radius: 6px;
+    border-left: 3px solid #ffc107;
+}
+
+.part-category-tooltip .note-label {
+    font-size: 11px;
+    color: #ffc107;
+    margin-bottom: 4px;
+}
+
+.part-category-tooltip .note-text {
+    font-size: 13px;
+    color: #e0e0e0;
+    line-height: 1.4;
+}
+
+/* 矢印（上向き） */
+.part-category-tooltip::before {
+    content: '';
+    position: absolute;
+    top: -8px;
+    left: 20px;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-bottom: 8px solid #1a1a2e;
+}
+
+.part-category-tooltip.arrow-bottom::before {
+    top: auto;
+    bottom: -8px;
+    border-bottom: none;
+    border-top: 8px solid #16213e;
+}
+
+/* CADリンクのホバースタイル強化 */
+.cad-link {
+    position: relative;
+    color: #007bff;
+    text-decoration: underline;
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.cad-link:hover {
+    color: #0056b3;
+}
+
+.cad-link.has-category::after {
+    content: '📦';
+    font-size: 10px;
+    margin-left: 4px;
+    opacity: 0.7;
+}
+
+/* タッチデバイス用のタップエリア拡大 */
+@media (hover: none) and (pointer: coarse) {
+    .cad-link {
+        padding: 8px 4px;
+        margin: -8px -4px;
+    }
+
+    .part-category-tooltip {
+        max-width: 90vw;
+        left: 5vw !important;
+        right: 5vw !important;
+    }
+}

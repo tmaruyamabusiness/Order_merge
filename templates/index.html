@@ -2973,6 +2973,11 @@
                             });
                         });
 
+                        // 🔥 部品分類ツールチップを紐付け
+                        if (typeof PartCategoryTooltip !== 'undefined') {
+                            PartCategoryTooltip.attachToLinks();
+                        }
+
                         // 🔥 自動保存イベントリスナーを追加
                         setupAutoSaveListeners();
                     } catch (error) {
@@ -3525,6 +3530,223 @@
             infoDiv.innerHTML = "<span style='color:red'>通信エラーで実行できませんでした</span>";
         });
     }
+
+    // 🔥 部品分類ツールチップ機能
+    const PartCategoryTooltip = {
+        element: null,
+        currentTarget: null,
+        hideTimeout: null,
+        cache: new Map(),
+        isTouchDevice: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
+
+        init() {
+            // ツールチップ要素を作成
+            this.element = document.createElement('div');
+            this.element.className = 'part-category-tooltip';
+            this.element.innerHTML = '<div class="tooltip-loading">読み込み中...</div>';
+            document.body.appendChild(this.element);
+
+            // ツールチップ外クリックで閉じる
+            document.addEventListener('click', (e) => {
+                if (!this.element.contains(e.target) && !e.target.classList.contains('cad-link')) {
+                    this.hide();
+                }
+            });
+
+            // ツールチップ自体のマウスオーバーで維持
+            this.element.addEventListener('mouseenter', () => {
+                this.clearHideTimeout();
+            });
+            this.element.addEventListener('mouseleave', () => {
+                this.scheduleHide();
+            });
+        },
+
+        attachToLinks() {
+            document.querySelectorAll('.cad-link').forEach(link => {
+                const spec1 = link.textContent.trim();
+
+                // Nで始まる仕様1にのみツールチップを付ける
+                if (spec1.startsWith('N') || spec1.startsWith('A')) {
+                    link.classList.add('has-category');
+
+                    if (this.isTouchDevice) {
+                        // タッチデバイス: 長押しで表示
+                        let touchTimer;
+                        link.addEventListener('touchstart', (e) => {
+                            touchTimer = setTimeout(() => {
+                                e.preventDefault();
+                                this.show(link, spec1);
+                            }, 500);
+                        }, { passive: false });
+                        link.addEventListener('touchend', () => clearTimeout(touchTimer));
+                        link.addEventListener('touchmove', () => clearTimeout(touchTimer));
+                    } else {
+                        // デスクトップ: ホバーで表示
+                        link.addEventListener('mouseenter', () => this.show(link, spec1));
+                        link.addEventListener('mouseleave', () => this.scheduleHide());
+                    }
+                }
+            });
+        },
+
+        async show(target, partCode) {
+            this.clearHideTimeout();
+            this.currentTarget = target;
+
+            // キャッシュチェック
+            let data = this.cache.get(partCode);
+            if (!data) {
+                // APIから取得
+                this.element.innerHTML = '<div style="padding:10px; color:#aaa;">読み込み中...</div>';
+                this.positionTooltip(target);
+                this.element.classList.add('visible');
+
+                try {
+                    const response = await fetch(`/api/part-category/${encodeURIComponent(partCode)}`);
+                    data = await response.json();
+                    this.cache.set(partCode, data);
+                } catch (error) {
+                    data = { success: false, error: '取得エラー' };
+                }
+            }
+
+            this.renderTooltip(data, partCode);
+            this.positionTooltip(target);
+            this.element.classList.add('visible');
+        },
+
+        renderTooltip(data, partCode) {
+            if (!data.success && !data.category_code) {
+                this.element.innerHTML = `
+                    <div class="tooltip-header">
+                        <span class="tooltip-title">エラー</span>
+                        <button class="tooltip-close" onclick="PartCategoryTooltip.hide()">×</button>
+                    </div>
+                    <div style="color:#ef5350;">${data.error || '情報を取得できませんでした'}</div>
+                `;
+                return;
+            }
+
+            const hasCategory = data.major_category;
+
+            let html = `
+                <div class="tooltip-header">
+                    <span class="tooltip-title">📦 ${partCode}</span>
+                    <button class="tooltip-close" onclick="PartCategoryTooltip.hide()">×</button>
+                </div>
+            `;
+
+            if (hasCategory) {
+                html += `
+                    <div class="category-info">
+                        <span class="info-label">大分類</span>
+                        <span class="info-value highlight">${data.major_category}</span>
+                        ${data.minor_category ? `
+                            <span class="info-label">小分類</span>
+                            <span class="info-value">${data.minor_category}</span>
+                        ` : ''}
+                    </div>
+                `;
+
+                if (data.note) {
+                    html += `
+                        <div class="note-section">
+                            <div class="note-label">補足</div>
+                            <div class="note-text">${data.note}</div>
+                        </div>
+                    `;
+                }
+            } else if (data.warning) {
+                html += `
+                    <div style="background:rgba(255,152,0,0.2); padding:10px; border-radius:6px; color:#ffb74d; margin-bottom:12px;">
+                        ⚠️ ${data.warning}
+                    </div>
+                `;
+            }
+
+            // 番号の内訳
+            if (data.serial || data.derivative || data.revision) {
+                html += `
+                    <div class="part-breakdown">
+                        <div class="part-breakdown-title">番号の内訳</div>
+                        <div class="part-breakdown-grid">
+                            <div class="breakdown-item">
+                                <span class="breakdown-label">分類記号</span>
+                                <span class="breakdown-value">${data.category_code || '-'}</span>
+                            </div>
+                            <div class="breakdown-item">
+                                <span class="breakdown-label">シリアル</span>
+                                <span class="breakdown-value">${data.serial || '-'}</span>
+                            </div>
+                            <div class="breakdown-item">
+                                <span class="breakdown-label">派生番号</span>
+                                <span class="breakdown-value">${data.derivative || '-'}</span>
+                            </div>
+                            <div class="breakdown-item">
+                                <span class="breakdown-label">リビジョン</span>
+                                <span class="breakdown-value">${data.revision || '-'}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            this.element.innerHTML = html;
+        },
+
+        positionTooltip(target) {
+            const rect = target.getBoundingClientRect();
+            const tooltipRect = this.element.getBoundingClientRect();
+            const windowHeight = window.innerHeight;
+            const windowWidth = window.innerWidth;
+
+            let top = rect.bottom + 10;
+            let left = rect.left;
+
+            // 画面下にはみ出す場合は上に表示
+            if (top + tooltipRect.height > windowHeight - 20) {
+                top = rect.top - tooltipRect.height - 10;
+                this.element.classList.add('arrow-bottom');
+            } else {
+                this.element.classList.remove('arrow-bottom');
+            }
+
+            // 画面右にはみ出す場合は左に寄せる
+            if (left + tooltipRect.width > windowWidth - 20) {
+                left = windowWidth - tooltipRect.width - 20;
+            }
+
+            // 画面左にはみ出す場合
+            if (left < 20) {
+                left = 20;
+            }
+
+            this.element.style.top = `${top}px`;
+            this.element.style.left = `${left}px`;
+        },
+
+        hide() {
+            this.element.classList.remove('visible');
+            this.currentTarget = null;
+        },
+
+        scheduleHide(delay = 300) {
+            this.hideTimeout = setTimeout(() => this.hide(), delay);
+        },
+
+        clearHideTimeout() {
+            if (this.hideTimeout) {
+                clearTimeout(this.hideTimeout);
+                this.hideTimeout = null;
+            }
+        }
+    };
+
+    // ページ読み込み時に初期化
+    document.addEventListener('DOMContentLoaded', () => {
+        PartCategoryTooltip.init();
+    });
     </script>
 </body>
 </html>
