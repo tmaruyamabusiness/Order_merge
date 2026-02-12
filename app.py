@@ -131,6 +131,7 @@ class OrderDetail(db.Model):
     material = db.Column(db.String(100))
     is_received = db.Column(db.Boolean, default=False)
     received_at = db.Column(db.DateTime)
+    received_quantity = db.Column(db.Integer)  # 実際に受け入れた数量（Noneの場合は全数受入）
     has_internal_processing = db.Column(db.Boolean, default=False)  # 社内加工フラグ
     parent_id = db.Column(db.Integer, db.ForeignKey('order_detail.id'), nullable=True)# 🔥 親子関係フィールド
     part_number = db.Column(db.String(50))
@@ -152,7 +153,8 @@ class ReceivedHistory(db.Model):
     order_number = db.Column(db.String(50), nullable=False, index=True)  # 発注番号（キー）
     item_name = db.Column(db.String(200))  # 品名
     spec1 = db.Column(db.String(200))  # 仕様1
-    quantity = db.Column(db.Integer)  # 数量
+    quantity = db.Column(db.Integer)  # 手配数量
+    received_quantity = db.Column(db.Integer)  # 実際に受け入れた数量
     is_received = db.Column(db.Boolean, default=True)  # 受入状態（True=受入、False=キャンセル）
     received_at = db.Column(db.DateTime)  # 受入日時
     cancelled_at = db.Column(db.DateTime)  # キャンセル日時
@@ -162,7 +164,7 @@ class ReceivedHistory(db.Model):
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     @classmethod
-    def record_receive(cls, order_number, item_name, spec1, quantity, client_ip):
+    def record_receive(cls, order_number, item_name, spec1, quantity, client_ip, received_quantity=None):
         """受入を記録"""
         # 既存レコードを検索（発注番号+品名+仕様1+数量で一意）
         existing = cls.query.filter_by(
@@ -177,6 +179,7 @@ class ReceivedHistory(db.Model):
             existing.is_received = True
             existing.received_at = datetime.now(timezone.utc)
             existing.received_by = client_ip
+            existing.received_quantity = received_quantity if received_quantity is not None else quantity
             existing.cancelled_at = None
             existing.cancelled_by = None
         else:
@@ -186,6 +189,7 @@ class ReceivedHistory(db.Model):
                 item_name=item_name,
                 spec1=spec1,
                 quantity=quantity,
+                received_quantity=received_quantity if received_quantity is not None else quantity,
                 is_received=True,
                 received_at=datetime.now(timezone.utc),
                 received_by=client_ip
@@ -406,6 +410,59 @@ PART_CATEGORY_INITIAL_DATA = [
 ]
 
 
+# ===== 枝番関連ヘルパー関数 =====
+def get_parent_seiban(seiban):
+    """製番から親製番を抽出（枝番を除去）
+    MHT0620-001 → MHT0620, 620-008 → 620
+    枝番でない場合はNoneを返す
+    """
+    if not seiban:
+        return None
+    match = re.match(r'^(.+?)-\d+$', seiban)
+    return match.group(1) if match else None
+
+
+def get_seiban_family(seiban):
+    """製番とその枝番ファミリーをすべて取得
+    親製番を入力 → 親 + すべての枝番を返す
+    枝番を入力 → 親 + すべての枝番を返す
+    """
+    if not seiban:
+        return []
+
+    # 枝番の場合、親製番を取得
+    parent = get_parent_seiban(seiban)
+    if parent:
+        base_seiban = parent
+    else:
+        base_seiban = seiban
+
+    # 親製番 + 枝番パターンで検索
+    pattern = f"{base_seiban}%"
+
+    # DBから該当する製番を取得
+    orders = Order.query.filter(
+        (Order.seiban == base_seiban) |
+        (Order.seiban.like(f"{base_seiban}-%"))
+    ).filter(
+        Order.is_archived == False
+    ).all()
+
+    # 製番リストを作成（重複除去）
+    seibans = list(set([o.seiban for o in orders]))
+
+    # ソート（親製番が先、枝番は番号順）
+    def sort_key(s):
+        if s == base_seiban:
+            return (0, 0)  # 親製番は最初
+        branch_match = re.match(rf'^{re.escape(base_seiban)}-(\d+)$', s)
+        if branch_match:
+            return (1, int(branch_match.group(1)))
+        return (2, s)
+
+    return sorted(seibans, key=sort_key)
+
+
 # Initialize database
 with app.app_context():
     db.create_all()
@@ -415,6 +472,24 @@ with app.app_context():
             conn.execute(db.text("ALTER TABLE order_detail ADD COLUMN reply_delivery_date VARCHAR(20)"))
             conn.commit()
         print("✓ reply_delivery_date カラムを追加しました")
+    except Exception:
+        pass  # 既に存在する場合は無視
+
+    # マイグレーション: received_quantity カラム追加 (OrderDetail)
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(db.text("ALTER TABLE order_detail ADD COLUMN received_quantity INTEGER"))
+            conn.commit()
+        print("✓ order_detail.received_quantity カラムを追加しました")
+    except Exception:
+        pass  # 既に存在する場合は無視
+
+    # マイグレーション: received_quantity カラム追加 (ReceivedHistory)
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(db.text("ALTER TABLE received_history ADD COLUMN received_quantity INTEGER"))
+            conn.commit()
+        print("✓ received_history.received_quantity カラムを追加しました")
     except Exception:
         pass  # 既に存在する場合は無視
 
@@ -2902,6 +2977,7 @@ def receive_page(seiban, unit=''):
                 'order_type': detail.order_type,
                 'remarks': detail.remarks,
                 'is_received': detail.is_received,
+                'received_quantity': detail.received_quantity,  # 実際の受入数量
                 'parent_id': detail.parent_id,
                 'has_internal_processing': detail.has_internal_processing,
                 # 🔥 検収データを追加
@@ -3507,37 +3583,110 @@ def receive_page(seiban, unit=''):
             return found;
         }}
 
-        // 受入切替関数
+        // 受入切替関数（数量入力対応）
         async function toggleReceive(detailId, setReceived, orderNumber, itemName, spec1, quantity) {{
             const action = setReceived ? '受入' : '受入取消';
-            
-            const confirmMessage = 'このアイテムを' + action + 'しますか？\\n\\n' +
-                '発注番号: ' + (orderNumber || '未設定') + '\\n' +
-                '品名: ' + (itemName || '未設定') + '\\n' +
-                '仕様１: ' + (spec1 || '未設定') + '\\n' +
-                '数量: ' + (quantity || '未設定');
-            
-            if (!confirm(confirmMessage)) {{
-                return;
-            }}
-            
-            try {{
-                const response = await fetch('/api/detail/' + detailId + '/receive', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ is_received: setReceived }})
-                }});
-                
-                if (response.ok) {{
-                    showToast(setReceived ? '✅ 受入しました' : '⚠️ 受入を取り消しました');
-                    setTimeout(function() {{ location.reload(); }}, 1000);
-                }} else {{
-                    const errorData = await response.json();
-                    showToast('❌ エラー: ' + (errorData.error || '不明なエラー'), 'error');
+
+            // 手配数量を数値として抽出
+            const expectedQty = parseInt((quantity || '0').toString().replace(/[^0-9]/g, ''), 10) || 0;
+
+            if (setReceived) {{
+                // 受入時：数量入力モーダルを表示
+                const infoText = '発注番号: ' + (orderNumber || '未設定') + '\\n' +
+                    '品名: ' + (itemName || '未設定') + '\\n' +
+                    '仕様１: ' + (spec1 || '未設定') + '\\n' +
+                    '手配数: ' + expectedQty;
+
+                const inputQty = prompt(
+                    '受入数量を入力してください。\\n' +
+                    '（全数受入の場合は空欄またはそのままOK）\\n\\n' +
+                    infoText,
+                    expectedQty.toString()
+                );
+
+                if (inputQty === null) {{
+                    return; // キャンセル
                 }}
-            }} catch (error) {{
-                showToast('❌ ネットワークエラー: ' + error, 'error');
-                console.error('Error:', error);
+
+                // 数量のパース（空欄の場合は全数受入）
+                let receivedQty = null;
+                if (inputQty.trim() !== '' && inputQty.trim() !== expectedQty.toString()) {{
+                    receivedQty = parseInt(inputQty.trim(), 10);
+                    if (isNaN(receivedQty) || receivedQty < 0) {{
+                        showToast('❌ 数量は0以上の数値を入力してください', 'error');
+                        return;
+                    }}
+
+                    // 不足・超過の確認
+                    if (receivedQty !== expectedQty) {{
+                        const diff = expectedQty - receivedQty;
+                        let confirmMsg;
+                        if (diff > 0) {{
+                            confirmMsg = '手配数より ' + diff + '個 不足しています。\\n不足分は備考に自動記録されます。\\nこのまま受入しますか？';
+                        }} else {{
+                            confirmMsg = '手配数より ' + (-diff) + '個 超過しています。\\n超過分は備考に自動記録されます。\\nこのまま受入しますか？';
+                        }}
+                        if (!confirm(confirmMsg)) {{
+                            return;
+                        }}
+                    }}
+                }}
+
+                // 受入API呼び出し
+                try {{
+                    const body = {{ is_received: true }};
+                    if (receivedQty !== null) {{
+                        body.received_quantity = receivedQty;
+                    }}
+
+                    const response = await fetch('/api/detail/' + detailId + '/receive-with-quantity', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify(body)
+                    }});
+
+                    const data = await response.json();
+
+                    if (data.success) {{
+                        showToast(data.message || '✅ 受入しました');
+                        setTimeout(function() {{ location.reload(); }}, 1000);
+                    }} else {{
+                        showToast('❌ エラー: ' + (data.error || '不明なエラー'), 'error');
+                    }}
+                }} catch (error) {{
+                    showToast('❌ ネットワークエラー: ' + error, 'error');
+                    console.error('Error:', error);
+                }}
+            }} else {{
+                // 受入取消時
+                const confirmMessage = 'このアイテムの受入を取り消しますか？\\n\\n' +
+                    '発注番号: ' + (orderNumber || '未設定') + '\\n' +
+                    '品名: ' + (itemName || '未設定') + '\\n' +
+                    '仕様１: ' + (spec1 || '未設定');
+
+                if (!confirm(confirmMessage)) {{
+                    return;
+                }}
+
+                try {{
+                    const response = await fetch('/api/detail/' + detailId + '/receive-with-quantity', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ is_received: false }})
+                    }});
+
+                    const data = await response.json();
+
+                    if (data.success) {{
+                        showToast('⚠️ 受入を取り消しました');
+                        setTimeout(function() {{ location.reload(); }}, 1000);
+                    }} else {{
+                        showToast('❌ エラー: ' + (data.error || '不明なエラー'), 'error');
+                    }}
+                }} catch (error) {{
+                    showToast('❌ ネットワークエラー: ' + error, 'error');
+                    console.error('Error:', error);
+                }}
             }}
         }}
         
@@ -3739,6 +3888,20 @@ def create_detail_html(detail, all_details):
     else:
         spec1_html = f'<div><strong>仕様１:</strong> {spec1_display}</div>'
     
+    # 受入数量の表示テキストを生成
+    received_qty_html = ''
+    if is_received:
+        expected_qty = detail.get('quantity') or 0
+        received_qty = detail.get('received_quantity')
+        if received_qty is not None and received_qty != expected_qty:
+            diff = expected_qty - received_qty
+            if diff > 0:
+                received_qty_html = f'<div style="background: #f8d7da; padding: 8px; border-radius: 5px; margin: 10px 0; font-size: 0.9em; border-left: 3px solid #dc3545;"><strong>受入数量:</strong> {received_qty}個 <span style="color: #dc3545; font-weight: bold;">（不足 {diff}個）</span></div>'
+            else:
+                received_qty_html = f'<div style="background: #fff3cd; padding: 8px; border-radius: 5px; margin: 10px 0; font-size: 0.9em; border-left: 3px solid #ffc107;"><strong>受入数量:</strong> {received_qty}個 <span style="color: #856404; font-weight: bold;">（超過 {-diff}個）</span></div>'
+        elif received_qty is not None:
+            received_qty_html = f'<div style="background: #d4edda; padding: 8px; border-radius: 5px; margin: 10px 0; font-size: 0.9em; border-left: 3px solid #28a745;"><strong>受入数量:</strong> {received_qty}個 <span style="color: #155724;">（全数）</span></div>'
+
     # 親アイテムのHTML
     html = f"""
     <div class="detail-item {'received' if is_received else ''}">
@@ -3746,22 +3909,24 @@ def create_detail_html(detail, all_details):
             <div class="item-name">{detail['item_name'] or '-'}</div>
             {f'<span class="status-badge badge-success">✅ 受入済</span>' if is_received else ''}
         </div>
-        
+
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px 15px; font-size: 0.9em; margin: 10px 0;">
             <div><strong>発注番号:</strong> {detail['order_number'] or '-'}</div>
             <div><strong>納期:</strong> {detail['delivery_date'] or '-'}</div>
             {spec1_html}
-            <div><strong>数量:</strong> {detail['quantity'] or ''} {detail['unit_measure'] or ''}</div>
+            <div><strong>手配数:</strong> {detail['quantity'] or ''} {detail['unit_measure'] or ''}</div>
             <div><strong>仕入先:</strong> {detail['supplier'] or '-'}</div>
             <div><strong>手配区分:</strong> {detail['order_type'] or '-'}</div>
         </div>
 
+        {received_qty_html}
+
         {f'<div style="background: #e3f2fd; padding: 8px; border-radius: 5px; margin: 10px 0; font-size: 0.85em; border-left: 3px solid #2196f3;"><strong>📝納品書入力日:</strong> {detail.get("received_delivery_date", "-")} / {int(detail.get("received_delivery_qty", 0)) if detail.get("received_delivery_qty") else "-"}個</div>' if detail.get('received_delivery_qty') else ''}
-        
+
         {f'<div style="background: #fff3cd; padding: 8px; border-radius: 5px; margin: 10px 0; font-size: 0.9em;"><strong>備考:</strong> {detail["remarks"]}</div>' if detail.get('remarks') else ''}
         {f'<span class="status-badge badge-warning">追加工有</span>' if has_children else ''}
-        
-        <button class="btn {'btn-warning' if is_received else 'btn-primary'}" 
+
+        <button class="btn {'btn-warning' if is_received else 'btn-primary'}"
                 onclick="toggleReceive({detail['id']}, {str(not is_received).lower()}, '{order_number}', '{item_name}', '{spec1}', '{quantity_str}')">
             {('受入取消' if is_received else '受入')}
         </button>
@@ -3814,23 +3979,39 @@ def create_detail_html(detail, all_details):
         else:
             child_spec1_html = f'<div><strong>仕様１:</strong> {child_spec1_display}</div>'
         
+        # 子アイテムの受入数量表示
+        child_received_qty_html = ''
+        if child_received:
+            child_expected_qty = child.get('quantity') or 0
+            child_recv_qty = child.get('received_quantity')
+            if child_recv_qty is not None and child_recv_qty != child_expected_qty:
+                child_diff = child_expected_qty - child_recv_qty
+                if child_diff > 0:
+                    child_received_qty_html = f'<div style="background: #f8d7da; padding: 6px; border-radius: 5px; margin: 8px 0; font-size: 0.85em; border-left: 3px solid #dc3545;"><strong>受入数量:</strong> {child_recv_qty}個 <span style="color: #dc3545; font-weight: bold;">（不足 {child_diff}個）</span></div>'
+                else:
+                    child_received_qty_html = f'<div style="background: #fff3cd; padding: 6px; border-radius: 5px; margin: 8px 0; font-size: 0.85em; border-left: 3px solid #ffc107;"><strong>受入数量:</strong> {child_recv_qty}個 <span style="color: #856404; font-weight: bold;">（超過 {-child_diff}個）</span></div>'
+            elif child_recv_qty is not None:
+                child_received_qty_html = f'<div style="background: #d4edda; padding: 6px; border-radius: 5px; margin: 8px 0; font-size: 0.85em; border-left: 3px solid #28a745;"><strong>受入数量:</strong> {child_recv_qty}個 <span style="color: #155724;">（全数）</span></div>'
+
         html += f"""
     <div class="detail-item child {'received' if child_received else ''}">
         <div class="detail-header">
             <div class="item-name">└─ {child['item_name'] or '-'}</div>
             {f'<span class="status-badge badge-success">✅ 受入済</span>' if child_received else ''}
         </div>
-        
+
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px 15px; font-size: 0.9em; margin: 10px 0;">
             <div><strong>発注番号:</strong> {child['order_number'] or '-'}</div>
             <div><strong>納期:</strong> {child['delivery_date'] or '-'}</div>
             {child_spec1_html}
-            <div><strong>数量:</strong> {child['quantity'] or ''} {child['unit_measure'] or ''}</div>
+            <div><strong>手配数:</strong> {child['quantity'] or ''} {child['unit_measure'] or ''}</div>
             <div><strong>仕入先:</strong> {child['supplier'] or '-'}</div>
             <div><strong>手配区分:</strong> {child['order_type'] or '-'}</div>
         </div>
-        
-        <button class="btn {'btn-warning' if child_received else 'btn-primary'}" 
+
+        {child_received_qty_html}
+
+        <button class="btn {'btn-warning' if child_received else 'btn-primary'}"
                 onclick="toggleReceive({child['id']}, {str(not child_received).lower()}, '{child_order_number}', '{child_item_name}', '{child_spec1}', '{child_quantity_str}')">
             {'受入取消' if child_received else '受入'}
         </button>
@@ -3868,6 +4049,7 @@ def get_order_details(order_id):
                 'order_type': detail.order_type,
                 'remarks': detail.remarks,
                 'is_received': detail.is_received,
+                'received_quantity': detail.received_quantity,  # 実際の受入数量
                 'received_at': detail.received_at.isoformat() if detail.received_at else None,
                 'has_internal_processing': detail.has_internal_processing,
                 'parent_id': detail.parent_id,  # 🔥 親子関係を追加
@@ -4065,6 +4247,171 @@ def toggle_receive_detail(detail_id):
 def receive_detail(detail_id):
     """Mark detail as received (deprecated - use toggle-receive instead)"""
     return toggle_receive_detail(detail_id)
+
+
+@app.route('/api/detail/<int:detail_id>/receive-with-quantity', methods=['POST'])
+def receive_detail_with_quantity(detail_id):
+    """数量指定での受入処理
+    リクエストボディ:
+    {
+        "received_quantity": 10,  // 実際に受け入れた数量（Nullまたは省略で全数受入）
+        "is_received": true       // true=受入、false=取消
+    }
+    """
+    try:
+        detail = OrderDetail.query.get_or_404(detail_id)
+        data = request.get_json() or {}
+
+        is_received = data.get('is_received', True)
+        received_quantity = data.get('received_quantity')
+
+        # 数量のバリデーション
+        if received_quantity is not None:
+            try:
+                received_quantity = int(received_quantity)
+                if received_quantity < 0:
+                    return jsonify({'success': False, 'error': '数量は0以上で入力してください'}), 400
+            except (ValueError, TypeError):
+                return jsonify({'success': False, 'error': '数量は数値で入力してください'}), 400
+
+        # 現在の状態を取得
+        was_received = detail.is_received
+        action = 'receive' if is_received else 'unreceive'
+
+        # ステータスを更新
+        detail.is_received = is_received
+        detail.received_at = datetime.now(timezone.utc) if is_received else None
+
+        # 受入数量を設定
+        if is_received:
+            detail.received_quantity = received_quantity  # Noneの場合は全数受入扱い
+        else:
+            detail.received_quantity = None
+
+        # 不足時の備考追加処理
+        shortage_note = ''
+        if is_received and received_quantity is not None and detail.quantity:
+            shortage = detail.quantity - received_quantity
+            if shortage > 0:
+                # 不足がある場合、備考に追加
+                shortage_note = f"【不足：{shortage}個】"
+                existing_remarks = detail.remarks or ''
+
+                # 既存の不足備考を削除（重複防止）
+                existing_remarks = re.sub(r'【不足：\d+個】', '', existing_remarks).strip()
+
+                # 新しい備考を設定
+                if existing_remarks:
+                    detail.remarks = f"{shortage_note} {existing_remarks}"
+                else:
+                    detail.remarks = shortage_note
+            elif shortage < 0:
+                # 超過の場合
+                overage = -shortage
+                shortage_note = f"【超過：{overage}個】"
+                existing_remarks = detail.remarks or ''
+                existing_remarks = re.sub(r'【(不足|超過)：\d+個】', '', existing_remarks).strip()
+                if existing_remarks:
+                    detail.remarks = f"{shortage_note} {existing_remarks}"
+                else:
+                    detail.remarks = shortage_note
+            else:
+                # 過不足なしの場合、不足/超過備考を削除
+                if detail.remarks:
+                    detail.remarks = re.sub(r'【(不足|超過)：\d+個】\s*', '', detail.remarks).strip()
+
+        # クライアントIPを取得
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if ',' in client_ip:
+            client_ip = client_ip.split(',')[0].strip()
+
+        # 受入履歴を記録
+        if detail.order_number:
+            if is_received:
+                ReceivedHistory.record_receive(
+                    order_number=detail.order_number,
+                    item_name=detail.item_name,
+                    spec1=detail.spec1,
+                    quantity=detail.quantity,
+                    client_ip=client_ip,
+                    received_quantity=received_quantity
+                )
+            else:
+                ReceivedHistory.record_cancel(
+                    order_number=detail.order_number,
+                    item_name=detail.item_name,
+                    spec1=detail.spec1,
+                    quantity=detail.quantity,
+                    client_ip=client_ip
+                )
+
+        # 編集ログを記録
+        log = EditLog(
+            detail_id=detail_id,
+            action=action,
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string if request.user_agent else 'Unknown'
+        )
+        db.session.add(log)
+
+        # 注文全体のステータスを更新
+        order = detail.order
+        details_list = order.details
+        total_count = len(details_list)
+        received_count = sum(1 for d in details_list if d.is_received)
+
+        if received_count == total_count:
+            order.status = '納品完了'
+        elif received_count > 0:
+            order.status = '納品中'
+        else:
+            order.status = '受入準備前'
+
+        order.updated_at = datetime.now(timezone.utc)
+
+        db.session.commit()
+
+        # Excelファイルを非同期で更新
+        _order_id = order.id
+        def _bg_excel_update():
+            try:
+                with app.app_context():
+                    update_unit_excel_only(_order_id)
+            except Exception as excel_error:
+                print(f"⚠️ Excel更新エラー（DB保存は成功）: {excel_error}")
+        Thread(target=_bg_excel_update, daemon=True).start()
+
+        # メッセージ作成
+        if is_received:
+            qty_msg = f"{received_quantity}" if received_quantity is not None else f"{detail.quantity}(全数)"
+            message = f'✅ 受入完了 ({qty_msg}個)\n'
+            if shortage_note:
+                message += f'\n{shortage_note}'
+        else:
+            message = f'❌ 受入取消\n'
+
+        # 社内加工の警告
+        has_internal = False
+        if detail.has_internal_processing:
+            message += '\n\n⚠️ 注意: 社内加工/追加工品です'
+            has_internal = True
+
+        return jsonify({
+            'success': True,
+            'message': message,
+            'is_received': detail.is_received,
+            'received_quantity': detail.received_quantity,
+            'expected_quantity': detail.quantity,
+            'order_status': order.status,
+            'has_internal_processing': has_internal,
+            'remarks': detail.remarks
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/detail/<int:detail_id>/logs')
 def get_detail_logs(detail_id):
@@ -4472,7 +4819,147 @@ def export_seiban(seiban):
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
-    
+
+
+@app.route('/api/export-seiban-family/<seiban>')
+def export_seiban_family(seiban):
+    """枝番ファミリー全体を1つのExcelファイルにまとめてエクスポート
+    MHT0620を指定 → MHT0620, MHT0620-001, MHT0620-002... を1つのファイルに
+    MHT0620-001を指定 → 同上（親製番を自動判定）
+    """
+    try:
+        # 枝番ファミリーを取得
+        family_seibans = get_seiban_family(seiban)
+
+        if not family_seibans:
+            return jsonify({'success': False, 'error': '製番が見つかりません'}), 404
+
+        # 親製番を取得（ファイル名用）
+        parent = get_parent_seiban(seiban)
+        base_seiban = parent if parent else seiban
+
+        # 全注文を取得
+        orders = Order.query.filter(
+            Order.seiban.in_(family_seibans),
+            Order.is_archived == False
+        ).all()
+
+        if not orders:
+            return jsonify({'success': False, 'error': '注文が見つかりません'}), 404
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = f"{base_seiban}_枝番統合"
+
+        # ヘッダー
+        headers = ['製番', 'ユニット', '品名', '仕様１', '仕様２', '数量', '単位',
+                   '納期', '手配区分', '発注番号', '仕入先', '仕入先CD', '備考',
+                   '受入数量', '検収日', '受入状態']
+        ws.append(headers)
+
+        # ヘッダーのスタイル設定
+        for col_idx, header in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=col_idx)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
+        # 製番順にソートしてデータを出力
+        sorted_orders = sorted(orders, key=lambda o: (
+            0 if o.seiban == base_seiban else 1,
+            o.seiban,
+            o.unit or ''
+        ))
+
+        for order in sorted_orders:
+            for detail in order.details:
+                # 受入数量の表示（received_quantityがNoneの場合は手配数と同じ）
+                received_qty = ''
+                if detail.is_received:
+                    received_qty = detail.received_quantity if detail.received_quantity is not None else detail.quantity
+
+                row = [
+                    order.seiban,
+                    order.unit,
+                    detail.item_name,
+                    detail.spec1,
+                    detail.spec2,
+                    detail.quantity,
+                    detail.unit_measure,
+                    detail.delivery_date,
+                    detail.order_type,
+                    detail.order_number,
+                    detail.supplier,
+                    detail.supplier_cd,
+                    detail.remarks,
+                    received_qty,
+                    detail.received_at.strftime('%Y-%m-%d %H:%M:%S') if detail.received_at else '',
+                    '受入済' if detail.is_received else '未受入'
+                ]
+                ws.append(row)
+
+        # 列幅の調整
+        column_widths = {
+            'A': 15, 'B': 20, 'C': 25, 'D': 20, 'E': 20, 'F': 8,
+            'G': 6, 'H': 12, 'I': 12, 'J': 12, 'K': 15, 'L': 10,
+            'M': 20, 'N': 10, 'O': 18, 'P': 10
+        }
+        for col, width in column_widths.items():
+            ws.column_dimensions[col].width = width
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        wb.close()
+
+        filename = f"{base_seiban}_枝番統合_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/seiban-family/<seiban>')
+def get_seiban_family_api(seiban):
+    """製番の枝番ファミリー情報を取得するAPI"""
+    try:
+        family_seibans = get_seiban_family(seiban)
+
+        # 各製番の統計情報を取得
+        result = []
+        for s in family_seibans:
+            orders = Order.query.filter_by(seiban=s, is_archived=False).all()
+            total_details = sum(len(o.details) for o in orders)
+            received_details = sum(sum(1 for d in o.details if d.is_received) for o in orders)
+
+            result.append({
+                'seiban': s,
+                'is_parent': get_parent_seiban(s) is None,
+                'unit_count': len(orders),
+                'total_details': total_details,
+                'received_details': received_details
+            })
+
+        parent = get_parent_seiban(seiban)
+        return jsonify({
+            'success': True,
+            'base_seiban': parent if parent else seiban,
+            'family': result,
+            'total_seibans': len(result)
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/orders/delete-multiple', methods=['POST'])
 def delete_multiple_orders():
     """複数の注文を一括削除"""
