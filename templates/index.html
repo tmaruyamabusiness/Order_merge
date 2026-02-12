@@ -2958,6 +2958,7 @@
                         
                         document.getElementById('modalBody').innerHTML = detailsHtml;
                         document.getElementById('detailModal').classList.add('show');
+                        updateBodyModalLock();
 
                         // Set current values
                         document.getElementById('statusSelect').value = data.order.status;
@@ -3368,8 +3369,14 @@
             }
         }
 
+        function updateBodyModalLock() {
+            const hasOpenModal = document.querySelector('.modal.show');
+            document.body.classList.toggle('modal-open', Boolean(hasOpenModal));
+        }
+
         function closeModal() {
             document.getElementById('detailModal').classList.remove('show');
+            updateBodyModalLock();
         }
 
         // 画像アップロード

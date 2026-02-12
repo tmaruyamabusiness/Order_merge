@@ -374,6 +374,12 @@
             flex-shrink: 0;
         }
         
+
+
+        body.modal-open {
+            overflow: hidden;
+        }
+
         .modal {
             display: none;
             position: fixed;
@@ -399,6 +405,7 @@
             max-width: 95vw;
             max-height: 90vh;
             overflow-y: auto;
+            overscroll-behavior: contain;
             animation: slideIn 0.3s;
         }
 

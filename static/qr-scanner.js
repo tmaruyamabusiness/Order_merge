@@ -33,6 +33,16 @@ let processedOrderNumbers = new Set();
 let currentScanMode = 'wide';
 
 // ========================================
+// モーダル表示中の背景スクロール制御
+// ========================================
+
+function toggleModalBodyLock() {
+    if (!document || !document.body) return;
+    const hasOpenModal = document.querySelector('.modal.show');
+    document.body.classList.toggle('modal-open', Boolean(hasOpenModal));
+}
+
+// ========================================
 // QRスキャナーを開始
 // ========================================
 function startQRScanner() {
@@ -56,6 +66,7 @@ function startQRScanner() {
 
     // モーダルを表示
     document.getElementById('qrScannerModal').classList.add('show');
+    toggleModalBodyLock();
 
     // スキャンログをクリア
     const scanLog = document.getElementById('scanLog');
@@ -595,6 +606,7 @@ function showReceiveConfirmPopup(orderNumber, detail) {
 
     modalBody.innerHTML = html;
     document.getElementById('barcodeReceiveModal').classList.add('show');
+    toggleModalBodyLock();
 }
 
 // ========================================
@@ -663,6 +675,7 @@ async function executeConfirmedReceive(detailId, orderNumber) {
 // ========================================
 function cancelReceiveAndResume() {
     document.getElementById('barcodeReceiveModal').classList.remove('show');
+    toggleModalBodyLock();
     showScannerToast('キャンセルしました', 'info');
     resumeScanning();
 }
@@ -714,6 +727,7 @@ function stopQRScanner() {
     // モーダルを閉じる
     document.getElementById('qrScannerModal').classList.remove('show');
     document.getElementById('barcodeReceiveModal').classList.remove('show');
+    toggleModalBodyLock();
 
     // スキャナー停止
     if (html5QrCode) {
@@ -813,6 +827,7 @@ async function showBarcodeReceivePopup(orderNumber) {
 
         modalBody.innerHTML = html;
         document.getElementById('barcodeReceiveModal').classList.add('show');
+    toggleModalBodyLock();
 
     } catch (error) {
         console.error('検索エラー:', error);
@@ -956,6 +971,7 @@ function closeBarcodeReceiveAndResume() {
         window.autoResumeTimer = null;
     }
     document.getElementById('barcodeReceiveModal').classList.remove('show');
+    toggleModalBodyLock();
     resumeScanning();
 }
 
@@ -964,4 +980,5 @@ function closeBarcodeReceiveAndResume() {
 // ========================================
 function closeBarcodeReceiveModal() {
     document.getElementById('barcodeReceiveModal').classList.remove('show');
+    toggleModalBodyLock();
 }
