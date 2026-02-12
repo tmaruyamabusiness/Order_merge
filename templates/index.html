@@ -3100,6 +3100,9 @@
                                    style="color: #007bff; text-decoration: underline; cursor: pointer;">
                                     ${spec1}
                                 </a>
+                                <button class="category-info-btn" data-part-code="${spec1}"
+                                    style="margin-left:4px; background:none; border:none; cursor:pointer; padding:0; font-size:0.9em; opacity:0.7;"
+                                    title="部品分類を表示">ℹ️</button>
                             `;
                         }
                         return spec1;
@@ -3549,7 +3552,7 @@
 
             // ツールチップ外クリックで閉じる
             document.addEventListener('click', (e) => {
-                if (!this.element.contains(e.target) && !e.target.classList.contains('cad-link')) {
+                if (!this.element.contains(e.target) && !e.target.classList.contains('category-info-btn')) {
                     this.hide();
                 }
             });
@@ -3562,40 +3565,22 @@
                 this.scheduleHide();
             });
 
-            // スクロール時はツールチップを非表示（スクロール固まり防止）
+            // スクロール時はツールチップを非表示
             document.addEventListener('scroll', () => {
-                this.cancelShow();
                 this.hide();
             }, { passive: true, capture: true });
         },
 
         attachToLinks() {
-            document.querySelectorAll('.cad-link').forEach(link => {
-                const spec1 = link.textContent.trim();
-
-                // Nで始まる仕様1にのみツールチップを付ける
-                if (spec1.startsWith('N') || spec1.startsWith('A')) {
-                    link.classList.add('has-category');
-
-                    if (this.isTouchDevice) {
-                        // タッチデバイス: 長押しで表示
-                        let touchTimer;
-                        link.addEventListener('touchstart', (e) => {
-                            touchTimer = setTimeout(() => {
-                                e.preventDefault();
-                                this.show(link, spec1);
-                            }, 500);
-                        }, { passive: false });
-                        link.addEventListener('touchend', () => clearTimeout(touchTimer));
-                        link.addEventListener('touchmove', () => clearTimeout(touchTimer));
-                    } else {
-                        // デスクトップ: ホバーで表示（デバウンス付き）
-                        link.addEventListener('mouseenter', () => this.scheduleShow(link, spec1));
-                        link.addEventListener('mouseleave', () => {
-                            this.cancelShow();
-                            this.scheduleHide();
-                        });
-                    }
+            // ℹ️ボタンのクリックでツールチップを表示
+            document.querySelectorAll('.category-info-btn').forEach(btn => {
+                const partCode = btn.getAttribute('data-part-code');
+                if (partCode) {
+                    btn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        this.show(btn, partCode);
+                    });
                 }
             });
         },
@@ -3642,7 +3627,7 @@
 
             let html = `
                 <div class="tooltip-header">
-                    <span class="tooltip-title">📦 ${partCode}</span>
+                    <span class="tooltip-title">ℹ️ ${partCode}</span>
                     <button class="tooltip-close" onclick="PartCategoryTooltip.hide()">×</button>
                 </div>
             `;
