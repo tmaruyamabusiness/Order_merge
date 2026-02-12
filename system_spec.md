@@ -113,17 +113,6 @@
 | timestamp | DATETIME | タイムスタンプ |
 | user_agent | VARCHAR(500) | ユーザーエージェント |
 
-#### ProcessingHistory テーブル（処理履歴）
-
-| カラム名 | 型 | 説明 |
-|---------|-----|------|
-| id | INTEGER | 主キー |
-| serial_no | INTEGER | 連番 |
-| issue_date | DATETIME | 発行日時 |
-| filename | VARCHAR(200) | ファイル名 |
-| file_size_kb | FLOAT | ファイルサイズ(KB) |
-| seiban | VARCHAR(50) | 製番 |
-
 ### 2.2 Across DB (SQL Server / ODBC)
 
 読み取り専用で以下のビューにアクセス:
@@ -231,8 +220,6 @@
 | GET | `/api/delivery-schedule` | 納品スケジュール |
 | GET | `/api/orders/gantt-data` | ガントデータ |
 | GET | `/api/check-update` | 更新確認 |
-| GET | `/api/load-history` | 履歴読込 |
-| POST | `/api/import-history` | 履歴インポート |
 | GET | `/api/get-system-status` | システム状態 |
 | GET | `/api/open-cad/<id>` | CADファイル開く |
 | GET | `/api/open-cad-by-spec/<spec1>` | 仕様１でCAD開く |
@@ -317,7 +304,6 @@ DB直接クエリに移行済み（互換性維持用スタブ）
 
 | 設定キー | パス | 用途 |
 |---------|------|------|
-| HISTORY_EXCEL_PATH | `\\server3\Share-data\Document\仕入れ\002_手配リスト\手配発注マージリスト発行履歴.xlsx` | 発行履歴 |
 | SEIBAN_LIST_PATH | `\\server3\share-data\Document\Acrossデータ\製番一覧表.xlsx` | 製番一覧 |
 | EXPORT_EXCEL_PATH | `\\SERVER3\Share-data\Document\仕入れ\002_手配リスト\手配発注リスト` | 出力先 |
 
@@ -345,7 +331,6 @@ USE acrossDB;
 3. **入荷管理** - QRスキャン、発注番号検索による受入
 4. **ユニット保管場所** - パレット管理
 5. **アーカイブ** - 完了済み製番
-6. **発行履歴** - 処理履歴
 
 ### 7.2 外部ライブラリ
 

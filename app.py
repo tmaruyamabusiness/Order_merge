@@ -243,14 +243,6 @@ class EditLog(db.Model):
     timestamp = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     user_agent = db.Column(db.String(500))
 
-class ProcessingHistory(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    serial_no = db.Column(db.Integer)
-    issue_date = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
-    filename = db.Column(db.String(200))
-    file_size_kb = db.Column(db.Float)
-    seiban = db.Column(db.String(50))
-
 # Initialize database
 with app.app_context():
     db.create_all()
@@ -3951,47 +3943,6 @@ def check_update():
         'message': 'この機能は廃止されました。DBから直接取得してください。'
     })
 
-@app.route('/api/load-history')
-def load_history():
-    """発行履歴を読み込み"""
-    try:
-        # パスをそのまま使用（既に正しいUNCパス形式）
-        history_path = Path(app.config['HISTORY_EXCEL_PATH'])
-        
-        if not history_path.exists():
-            return jsonify({
-                'success': False,
-                'error': f'履歴ファイルが見つかりません: {history_path}'
-            }), 404
-        
-        # 履歴ファイルを読み込み
-        df = pd.read_excel(str(history_path))
-        
-        # データを辞書形式に変換
-        history_data = []
-        for _, row in df.iterrows():
-            filename = row.get('ファイル名', '')
-            seiban = extract_seiban_from_filename(filename)
-            
-            history_data.append({
-                'no': row.get('No.', ''),
-                'issue_date': str(row.get('発行日', '')),
-                'filename': filename,
-                'size_kb': row.get('容量(KB)', 0),
-                'seiban': seiban or '不明'
-            })
-        
-        return jsonify({
-            'success': True,
-            'data': history_data,
-            'total': len(history_data)
-        })
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
-
 @app.route('/api/export/<int:order_id>')
 def export_order(order_id):
     """注文データをExcelファイルとしてエクスポート"""
@@ -4066,48 +4017,6 @@ def delete_order(order_id):
         return jsonify({'success': True, 'message': 'Order deleted successfully'})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/import-history', methods=['POST'])
-def import_history():
-    """Import order history from Excel file"""
-    try:
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file uploaded'}), 400
-        
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
-        
-        # Read Excel file
-        df = pd.read_excel(file)
-        
-        imported_count = 0
-        for _, row in df.iterrows():
-            filename = row.get('ファイル名', '')
-            seiban = extract_seiban_from_filename(filename)
-            
-            if seiban:
-                # Check if already exists
-                existing = ProcessingHistory.query.filter_by(filename=filename).first()
-                if not existing:
-                    history = ProcessingHistory(
-                        serial_no=row.get('No.', 0),
-                        issue_date=pd.to_datetime(row.get('発行日', datetime.now())),
-                        filename=filename,
-                        file_size_kb=row.get('容量(KB)', 0),
-                        seiban=seiban
-                    )
-                    db.session.add(history)
-                    imported_count += 1
-        
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'message': f'Imported {imported_count} records successfully'
-        })
-    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/search-by-spec1/<spec1>')

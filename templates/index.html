@@ -82,7 +82,6 @@
             <button class="nav-tab" onclick="switchTab('receiving')">📦 入荷管理</button>
             <button class="nav-tab" onclick="switchTab('pallets')">🏢 ユニット保管場所</button>
             <button class="nav-tab" onclick="switchTab('archive')">🗄️ アーカイブ</button>
-            <button class="nav-tab" onclick="switchTab('history')">📊 発行履歴</button>
         </div>
         
         <div class="content">
@@ -1436,25 +1435,6 @@
                 <h2>🗄️ アーカイブ（納品完了）</h2>
                 <p>納品完了してアーカイブされた注文一覧</p>
                 <div id="archiveGrid" class="order-grid"></div>
-            </div>
-
-            <!-- 発行履歴タブ -->
-            <div id="history-tab" class="tab-content">
-                <h2>📊 発行履歴</h2>
-                <button class="btn btn-primary" onclick="loadHistoryData()">
-                    履歴を更新
-                </button>
-                <button class="btn btn-warning" onclick="document.getElementById('historyFileInput').click()" style="margin-left: 10px;">
-                    履歴ファイルを手動インポート
-                </button>
-                <input type="file" id="historyFileInput" accept=".xlsx" style="display: none;" onchange="importHistory(this)">
-                
-                <div id="historyList" style="margin-top: 20px;">
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        <p>履歴を読み込み中...</p>
-                    </div>
-                </div>
             </div>
         </div>
     </div>
@@ -3523,32 +3503,6 @@
             document.getElementById('qrInput').value = '';
         }
 
-        async function importHistory(input) {
-            const file = input.files[0];
-            if (!file) return;
-            
-            const formData = new FormData();
-            formData.append('file', file);
-            
-            try {
-                const response = await fetch('/api/import-history', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    alert(data.message);
-                    loadHistoryData();
-                } else {
-                    alert('エラー: ' + data.error);
-                }
-            } catch (error) {
-                alert('インポートエラー: ' + error);
-            }
-        }
-
     function runBatchFile() {
         const batPath = "C:\\Users\\t.maruyama\\refresh_order.bat";
         const infoDiv = document.getElementById("networkFileInfo");
@@ -3571,68 +3525,6 @@
             infoDiv.innerHTML = "<span style='color:red'>通信エラーで実行できませんでした</span>";
         });
     }
-        async function loadHistoryData() {
-            // 履歴データを自動読み込み
-            const historyList = document.getElementById('historyList');
-            historyList.innerHTML = '<div class="loading"><div class="spinner"></div><p>読み込み中...</p></div>';
-            
-            try {
-                const response = await fetch('/api/load-history');
-                const data = await response.json();
-                
-                if (data.success) {
-                    let html = `
-                        <h3>発行履歴 (${data.total}件)</h3>
-                        <div style="max-height: 600px; overflow-y: auto;">
-                            <table class="detail-table">
-                                <thead>
-                                    <tr>
-                                        <th>No.</th>
-                                        <th>発行日</th>
-                                        <th>ファイル名</th>
-                                        <th>製番</th>
-                                        <th>容量(KB)</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                    `;
-                    
-                    data.data.forEach(item => {
-                        html += `
-                            <tr>
-                                <td>${item.no}</td>
-                                <td>${item.issue_date}</td>
-                                <td>${item.filename}</td>
-                                <td><strong>${item.seiban}</strong></td>
-                                <td>${item.size_kb}</td>
-                            </tr>
-                        `;
-                    });
-                    
-                    html += `
-                                </tbody>
-                            </table>
-                        </div>
-                    `;
-                    
-                    historyList.innerHTML = html;
-                } else {
-                    historyList.innerHTML = `
-                        <div class="alert alert-warning">
-                            エラー: ${data.error}<br>
-                            履歴ファイルが読み込めません。ネットワーク接続を確認してください。
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                historyList.innerHTML = `
-                    <div class="alert alert-danger">
-                        読み込みエラー: ${error}<br>
-                        ネットワークファイルにアクセスできません。
-                    </div>
-                `;
-            }
-        }
     </script>
 </body>
 </html>
