@@ -32,6 +32,7 @@ let processedOrderNumbers = new Set();
 // スキャンモード: 'wide'(デフォルト), 'narrow'(ピンポイント), 'barcode'(横長)
 let currentScanMode = 'wide';
 
+
 // ========================================
 // QRスキャナーを開始
 // ========================================

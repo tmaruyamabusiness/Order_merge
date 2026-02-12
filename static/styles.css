@@ -374,6 +374,8 @@
             flex-shrink: 0;
         }
         
+
+
         .modal {
             display: none;
             position: fixed;
@@ -383,6 +385,9 @@
             width: 100%;
             height: 100%;
             background: rgba(0,0,0,0.5);
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
             animation: fadeIn 0.3s;
         }
 
@@ -399,6 +404,7 @@
             max-width: 95vw;
             max-height: 90vh;
             overflow-y: auto;
+            touch-action: pan-y;
             animation: slideIn 0.3s;
         }
 
