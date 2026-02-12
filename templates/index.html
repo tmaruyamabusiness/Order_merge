@@ -3543,6 +3543,7 @@
         element: null,
         currentTarget: null,
         hideTimeout: null,
+        showTimeout: null,  // デバウンス用タイマー
         cache: new Map(),
         isTouchDevice: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
 
@@ -3567,6 +3568,12 @@
             this.element.addEventListener('mouseleave', () => {
                 this.scheduleHide();
             });
+
+            // スクロール時はツールチップを非表示（スクロール固まり防止）
+            document.addEventListener('scroll', () => {
+                this.cancelShow();
+                this.hide();
+            }, { passive: true, capture: true });
         },
 
         attachToLinks() {
@@ -3589,9 +3596,12 @@
                         link.addEventListener('touchend', () => clearTimeout(touchTimer));
                         link.addEventListener('touchmove', () => clearTimeout(touchTimer));
                     } else {
-                        // デスクトップ: ホバーで表示
-                        link.addEventListener('mouseenter', () => this.show(link, spec1));
-                        link.addEventListener('mouseleave', () => this.scheduleHide());
+                        // デスクトップ: ホバーで表示（デバウンス付き）
+                        link.addEventListener('mouseenter', () => this.scheduleShow(link, spec1));
+                        link.addEventListener('mouseleave', () => {
+                            this.cancelShow();
+                            this.scheduleHide();
+                        });
                     }
                 }
             });
@@ -3672,33 +3682,6 @@
                 `;
             }
 
-            // 番号の内訳
-            if (data.serial || data.derivative || data.revision) {
-                html += `
-                    <div class="part-breakdown">
-                        <div class="part-breakdown-title">番号の内訳</div>
-                        <div class="part-breakdown-grid">
-                            <div class="breakdown-item">
-                                <span class="breakdown-label">分類記号</span>
-                                <span class="breakdown-value">${data.category_code || '-'}</span>
-                            </div>
-                            <div class="breakdown-item">
-                                <span class="breakdown-label">シリアル</span>
-                                <span class="breakdown-value">${data.serial || '-'}</span>
-                            </div>
-                            <div class="breakdown-item">
-                                <span class="breakdown-label">派生番号</span>
-                                <span class="breakdown-value">${data.derivative || '-'}</span>
-                            </div>
-                            <div class="breakdown-item">
-                                <span class="breakdown-label">リビジョン</span>
-                                <span class="breakdown-value">${data.revision || '-'}</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }
-
             this.element.innerHTML = html;
         },
 
@@ -3746,6 +3729,21 @@
             if (this.hideTimeout) {
                 clearTimeout(this.hideTimeout);
                 this.hideTimeout = null;
+            }
+        },
+
+        // デバウンス付き表示（スクロール中の誤表示防止）
+        scheduleShow(target, partCode, delay = 200) {
+            this.cancelShow();
+            this.showTimeout = setTimeout(() => {
+                this.show(target, partCode);
+            }, delay);
+        },
+
+        cancelShow() {
+            if (this.showTimeout) {
+                clearTimeout(this.showTimeout);
+                this.showTimeout = null;
             }
         }
     };

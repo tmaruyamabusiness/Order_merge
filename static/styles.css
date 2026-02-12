@@ -883,45 +883,6 @@
     font-size: 15px;
 }
 
-.part-category-tooltip .part-breakdown {
-    background: rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    padding: 12px;
-    margin-top: 12px;
-}
-
-.part-category-tooltip .part-breakdown-title {
-    color: #81c784;
-    font-weight: 600;
-    font-size: 12px;
-    margin-bottom: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.part-category-tooltip .part-breakdown-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
-}
-
-.part-category-tooltip .breakdown-item {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.part-category-tooltip .breakdown-label {
-    font-size: 11px;
-    color: #aaa;
-}
-
-.part-category-tooltip .breakdown-value {
-    font-family: 'Monaco', 'Consolas', monospace;
-    font-size: 14px;
-    color: #e0e0e0;
-}
-
 .part-category-tooltip .note-section {
     margin-top: 12px;
     padding: 10px;
