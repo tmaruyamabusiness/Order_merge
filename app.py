@@ -4916,6 +4916,140 @@ def export_seiban_family(seiban):
         for col, width in column_widths.items():
             ws.column_dimensions[col].width = width
 
+        # ===== シート2: 備考・仕様1キー集計シート（ピックアップ用） =====
+        ws_pickup = wb.create_sheet(title="ピックアップ集計")
+
+        # 備考と仕様1をキーに数量を集計（在庫部品のみ）
+        pickup_data = {}  # キー: (備考, 仕様1) -> 集計データ
+
+        for order in sorted_orders:
+            for detail in order.details:
+                # 在庫部品のみ対象
+                if detail.order_type != '在庫部品':
+                    continue
+
+                key = (detail.remarks or '', detail.spec1 or '')
+                if key not in pickup_data:
+                    pickup_data[key] = {
+                        'remarks': detail.remarks or '',
+                        'spec1': detail.spec1 or '',
+                        'item_name': detail.item_name or '',
+                        'spec2': detail.spec2 or '',
+                        'unit_measure': detail.unit_measure or '',
+                        'total_quantity': 0,
+                        'items': []  # 詳細情報のリスト
+                    }
+                pickup_data[key]['total_quantity'] += detail.quantity or 0
+                pickup_data[key]['items'].append({
+                    'seiban': order.seiban,
+                    'unit': order.unit,
+                    'quantity': detail.quantity
+                })
+
+        # ヘッダー
+        pickup_headers = ['備考', '仕様１', '品名', '仕様２', '合計数量', '単位', '内訳（ユニット）']
+        ws_pickup.append(pickup_headers)
+
+        # ヘッダーのスタイル設定
+        for col_idx, header in enumerate(pickup_headers, start=1):
+            cell = ws_pickup.cell(row=1, column=col_idx)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="70AD47", end_color="70AD47", fill_type="solid")
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
+        # 備考でソートして出力
+        sorted_pickup = sorted(pickup_data.items(), key=lambda x: (x[0][0], x[0][1]))
+
+        for (remarks, spec1), data in sorted_pickup:
+            # 内訳を作成
+            breakdown = ', '.join([f"{item['unit']}({item['quantity']})" for item in data['items']])
+
+            row = [
+                data['remarks'],
+                data['spec1'],
+                data['item_name'],
+                data['spec2'],
+                data['total_quantity'],
+                data['unit_measure'],
+                breakdown
+            ]
+            ws_pickup.append(row)
+
+        # ピックアップシートの列幅調整
+        pickup_widths = {'A': 15, 'B': 25, 'C': 25, 'D': 20, 'E': 10, 'F': 6, 'G': 50}
+        for col, width in pickup_widths.items():
+            ws_pickup.column_dimensions[col].width = width
+
+        # ===== シート3: ユニット別分類シート =====
+        ws_unit = wb.create_sheet(title="ユニット別分類")
+
+        # ヘッダー
+        unit_headers = ['ユニット', '品名', '仕様１', '仕様２', '数量', '単位', '手配区分', '備考']
+        ws_unit.append(unit_headers)
+
+        # ヘッダーのスタイル設定
+        for col_idx, header in enumerate(unit_headers, start=1):
+            cell = ws_unit.cell(row=1, column=col_idx)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="ED7D31", end_color="ED7D31", fill_type="solid")
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
+        # ユニットでグループ化（在庫部品のみ）
+        unit_groups = {}
+        for order in sorted_orders:
+            unit_name = order.unit or '（ユニットなし）'
+            if unit_name not in unit_groups:
+                unit_groups[unit_name] = []
+            for detail in order.details:
+                if detail.order_type != '在庫部品':
+                    continue
+                unit_groups[unit_name].append({
+                    'item_name': detail.item_name,
+                    'spec1': detail.spec1,
+                    'spec2': detail.spec2,
+                    'quantity': detail.quantity,
+                    'unit_measure': detail.unit_measure,
+                    'order_type': detail.order_type,
+                    'remarks': detail.remarks
+                })
+
+        # ユニット順でソートして出力
+        current_row = 2
+        unit_colors = ['FFF2CC', 'E2EFDA', 'DEEBF7', 'FCE4D6', 'EDEDED', 'D9E1F2']
+        color_idx = 0
+
+        for unit_name in sorted(unit_groups.keys()):
+            items = unit_groups[unit_name]
+            if not items:
+                continue
+
+            unit_color = unit_colors[color_idx % len(unit_colors)]
+            color_idx += 1
+
+            for item in items:
+                row = [
+                    unit_name,
+                    item['item_name'],
+                    item['spec1'],
+                    item['spec2'],
+                    item['quantity'],
+                    item['unit_measure'],
+                    item['order_type'],
+                    item['remarks']
+                ]
+                ws_unit.append(row)
+
+                # 行に背景色を設定
+                for col_idx in range(1, len(unit_headers) + 1):
+                    cell = ws_unit.cell(row=current_row, column=col_idx)
+                    cell.fill = PatternFill(start_color=unit_color, end_color=unit_color, fill_type="solid")
+                current_row += 1
+
+        # ユニット別シートの列幅調整
+        unit_widths = {'A': 20, 'B': 25, 'C': 25, 'D': 20, 'E': 8, 'F': 6, 'G': 12, 'H': 20}
+        for col, width in unit_widths.items():
+            ws_unit.column_dimensions[col].width = width
+
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
