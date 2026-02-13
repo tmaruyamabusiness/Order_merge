@@ -296,6 +296,73 @@ class PartCategory(db.Model):
         return result
 
 
+class UserSettings(db.Model):
+    """ユーザー設定テーブル - クライアントIPアドレスをキーに設定を保存"""
+    id = db.Column(db.Integer, primary_key=True)
+    client_ip = db.Column(db.String(45), unique=True, nullable=False, index=True)  # IPv6対応
+
+    # 受入モード設定
+    simple_mode = db.Column(db.Boolean, default=False)  # シンプルモード（箱QRスキャン時に未受入部品リストを表示）
+
+    # 表示設定
+    view_mode = db.Column(db.String(20), default='card')  # card / table
+
+    # その他の設定（JSON形式で拡張可能）
+    settings_json = db.Column(db.Text, default='{}')
+
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    @classmethod
+    def get_or_create(cls, client_ip):
+        """クライアントIPで設定を取得、なければ作成"""
+        settings = cls.query.filter_by(client_ip=client_ip).first()
+        if not settings:
+            settings = cls(client_ip=client_ip)
+            db.session.add(settings)
+            db.session.commit()
+        return settings
+
+    @classmethod
+    def get_settings(cls, client_ip):
+        """設定を辞書形式で取得"""
+        settings = cls.get_or_create(client_ip)
+        extra_settings = {}
+        if settings.settings_json:
+            try:
+                extra_settings = json.loads(settings.settings_json)
+            except:
+                pass
+        return {
+            'simple_mode': settings.simple_mode,
+            'view_mode': settings.view_mode,
+            **extra_settings
+        }
+
+    @classmethod
+    def update_settings(cls, client_ip, **kwargs):
+        """設定を更新"""
+        settings = cls.get_or_create(client_ip)
+
+        # 基本設定を更新
+        if 'simple_mode' in kwargs:
+            settings.simple_mode = kwargs.pop('simple_mode')
+        if 'view_mode' in kwargs:
+            settings.view_mode = kwargs.pop('view_mode')
+
+        # 残りの設定はJSONに保存
+        if kwargs:
+            try:
+                extra = json.loads(settings.settings_json or '{}')
+            except:
+                extra = {}
+            extra.update(kwargs)
+            settings.settings_json = json.dumps(extra)
+
+        db.session.commit()
+        return settings
+
+
 # 分類記号マスタの初期データ
 PART_CATEGORY_INITIAL_DATA = [
     ('NAA', '角ブロック', 'スペーサブロック', '主に角型ブロック（円筒形状中心穴はカラー）'),
@@ -5381,6 +5448,181 @@ def get_pallet_stats():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# 🔥 ユーザー設定API
+@app.route('/api/user-settings', methods=['GET'])
+def get_user_settings():
+    """ユーザー設定を取得"""
+    try:
+        client_ip = request.remote_addr or '0.0.0.0'
+        settings = UserSettings.get_settings(client_ip)
+        return jsonify({
+            'success': True,
+            'settings': settings
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/user-settings', methods=['POST'])
+def update_user_settings():
+    """ユーザー設定を更新"""
+    try:
+        client_ip = request.remote_addr or '0.0.0.0'
+        data = request.get_json()
+
+        if not data:
+            return jsonify({'error': 'データがありません'}), 400
+
+        UserSettings.update_settings(client_ip, **data)
+        settings = UserSettings.get_settings(client_ip)
+
+        return jsonify({
+            'success': True,
+            'message': '設定を保存しました',
+            'settings': settings
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+# 🔥 箱（パレット）QRスキャン用API - 未受入部品リスト取得
+@app.route('/api/box/<pallet_number>/unreceived-parts')
+def get_box_unreceived_parts(pallet_number):
+    """箱（パレット）に紐づく未受入部品リストを取得"""
+    try:
+        # パレット番号に紐づくOrderを検索
+        orders = Order.query.filter(
+            Order.pallet_number == pallet_number,
+            Order.is_archived == False
+        ).all()
+
+        if not orders:
+            return jsonify({
+                'success': True,
+                'found': False,
+                'pallet_number': pallet_number,
+                'message': f'箱 {pallet_number} に紐づく製番が見つかりません',
+                'parts': [],
+                'summary': {'total': 0, 'unreceived': 0, 'received': 0}
+            })
+
+        # 各Orderの詳細を取得
+        parts = []
+        total_count = 0
+        unreceived_count = 0
+        received_count = 0
+
+        for order in orders:
+            for detail in order.details:
+                total_count += 1
+                if detail.is_received:
+                    received_count += 1
+                else:
+                    unreceived_count += 1
+                    parts.append({
+                        'id': detail.id,
+                        'seiban': order.seiban,
+                        'unit': order.unit or '',
+                        'order_number': detail.order_number,
+                        'item_name': detail.item_name,
+                        'spec1': detail.spec1,
+                        'spec2': detail.spec2,
+                        'quantity': detail.quantity,
+                        'unit_measure': detail.unit_measure,
+                        'delivery_date': detail.delivery_date,
+                        'supplier': detail.supplier,
+                        'order_type': detail.order_type,
+                        'is_received': detail.is_received
+                    })
+
+        # 納期順でソート
+        parts.sort(key=lambda x: x.get('delivery_date') or '9999-99-99')
+
+        return jsonify({
+            'success': True,
+            'found': True,
+            'pallet_number': pallet_number,
+            'orders': [{'seiban': o.seiban, 'unit': o.unit or '', 'product_name': o.product_name or ''} for o in orders],
+            'parts': parts,
+            'summary': {
+                'total': total_count,
+                'unreceived': unreceived_count,
+                'received': received_count
+            }
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# 🔥 箱QRコードで箱を検索
+@app.route('/api/search-by-box-qr/<qr_data>')
+def search_by_box_qr(qr_data):
+    """箱QRコードから箱情報を検索
+    QRコード形式: PALLET:P001, BOX:P001, またはP001などの直接パレット番号
+    """
+    try:
+        # QRコードから箱番号を抽出
+        pallet_number = None
+
+        if qr_data.upper().startswith('PALLET:'):
+            pallet_number = qr_data[7:].strip()
+        elif qr_data.upper().startswith('BOX:'):
+            pallet_number = qr_data[4:].strip()
+        elif re.match(r'^[PDT]\d{3}$', qr_data.upper()):
+            # P001, D001, T001 形式
+            pallet_number = qr_data.upper()
+        else:
+            # そのまま使用
+            pallet_number = qr_data.strip()
+
+        if not pallet_number:
+            return jsonify({
+                'success': False,
+                'error': '箱番号を認識できませんでした'
+            }), 400
+
+        # パレット番号に紐づくOrderを検索
+        orders = Order.query.filter(
+            Order.pallet_number == pallet_number,
+            Order.is_archived == False
+        ).all()
+
+        if not orders:
+            return jsonify({
+                'success': True,
+                'found': False,
+                'pallet_number': pallet_number,
+                'message': f'箱 {pallet_number} に紐づく製番が見つかりません'
+            })
+
+        # 未受入部品数をカウント
+        total_unreceived = 0
+        for order in orders:
+            for detail in order.details:
+                if not detail.is_received:
+                    total_unreceived += 1
+
+        return jsonify({
+            'success': True,
+            'found': True,
+            'pallet_number': pallet_number,
+            'floor': orders[0].floor if orders else None,
+            'order_count': len(orders),
+            'unreceived_count': total_unreceived,
+            'orders': [{
+                'id': o.id,
+                'seiban': o.seiban,
+                'unit': o.unit or '',
+                'product_name': o.product_name or '',
+                'status': o.status
+            } for o in orders]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 import subprocess
 import os

@@ -500,11 +500,13 @@
                             <button onclick="stopQRScanner()" style="background: none; border: none; color: white; font-size: 1.5em; cursor: pointer;">×</button>
                         </div>
                         <div class="modal-body" style="text-align: center; padding: 15px;">
-                            <!-- スキャン範囲切替 -->
-                            <div style="display:flex; justify-content:center; gap:6px; margin-bottom:10px;">
+                            <!-- スキャン範囲切替 & シンプルモード -->
+                            <div style="display:flex; justify-content:center; gap:6px; margin-bottom:10px; flex-wrap:wrap;">
                                 <button class="btn btn-sm" id="scanModeWide" onclick="setScanMode('wide')" style="background:#0d6efd;color:#fff;padding:4px 10px;font-size:0.85em;">広域</button>
                                 <button class="btn btn-sm" id="scanModeNarrow" onclick="setScanMode('narrow')" style="padding:4px 10px;font-size:0.85em;">ピンポイント</button>
                                 <button class="btn btn-sm" id="scanModeBarcode" onclick="setScanMode('barcode')" style="padding:4px 10px;font-size:0.85em;">バーコード</button>
+                                <span style="border-left: 1px solid #ccc; margin: 0 4px;"></span>
+                                <button class="btn btn-sm" id="simpleModeToggle" onclick="toggleSimpleMode()" style="padding:4px 10px;font-size:0.85em;" title="箱QRをスキャンして未受入部品リストを表示">📋 通常</button>
                             </div>
                             <!-- Html5Qrcode用のコンテナ -->
                             <div id="qr-reader" style="width: 100%; max-width: 400px; margin: 0 auto;"></div>
@@ -513,7 +515,8 @@
                             <div id="scanLog" style="margin-top: 8px; max-height: 150px; overflow-y: auto; text-align: left; background: #f8f9fa; border-radius: 6px;"></div>
                             <p style="margin-top: 8px; color: #6c757d; font-size: 0.85em;">
                                 連続スキャン対応 - 確認後に受入処理<br>
-                                <small>QRが近接している場合は「ピンポイント」に切替</small>
+                                <small>QRが近接している場合は「ピンポイント」に切替</small><br>
+                                <small>📦 箱QR (P001等) をスキャン → 未受入部品リスト表示</small>
                             </p>
                             <button class="btn btn-danger" onclick="stopQRScanner()" style="margin-top: 10px;">
                                 スキャン終了

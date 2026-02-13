@@ -54,12 +54,19 @@ function startQRScanner() {
     lastScannedCode = null;
     isScannerPaused = false;
 
+    // 🔥 箱確認待ち状態をクリア
+    currentExpectedBox = null;
+    pendingReceiveDetail = null;
+
     // モーダルを表示
     document.getElementById('qrScannerModal').classList.add('show');
 
     // スキャンログをクリア
     const scanLog = document.getElementById('scanLog');
     if (scanLog) scanLog.innerHTML = '';
+
+    // 🔥 ユーザー設定を読み込み（シンプルモード状態を反映）
+    loadUserSettings();
 
     // スキャナー初期化
     setTimeout(() => {
@@ -383,6 +390,17 @@ function processScannedCode(data) {
 
     // データの前処理
     data = data.trim();
+
+    // 🔥 箱QRコードの検出（シンプルモード時、または正しい箱確認待ち時）
+    if (isBoxQRCode(data)) {
+        const boxNumber = extractBoxNumber(data);
+        if (boxNumber) {
+            console.log(`箱QRコード検出: ${data} → ${boxNumber}`);
+            processBoxQRCode(boxNumber);
+            return;
+        }
+    }
+
     let orderNumber = null;
 
     // 🔥 発注番号バーコードパターン: 8桁の数字 + アルファベット1文字 (例: 00088333P)
@@ -965,3 +983,446 @@ function closeBarcodeReceiveAndResume() {
 function closeBarcodeReceiveModal() {
     document.getElementById('barcodeReceiveModal').classList.remove('show');
 }
+
+
+// ========================================
+// 🔥 シンプルモード設定
+// ========================================
+let simpleMode = false;
+let currentExpectedBox = null;  // 正しい箱に入れる時の期待箱番号
+let pendingReceiveDetail = null;  // 箱確認待ちの部品詳細
+
+// ========================================
+// 🔥 設定をサーバーから読み込み
+// ========================================
+async function loadUserSettings() {
+    try {
+        const response = await fetch('/api/user-settings');
+        const data = await response.json();
+        if (data.success && data.settings) {
+            simpleMode = data.settings.simple_mode || false;
+            updateSimpleModeUI();
+        }
+    } catch (error) {
+        console.error('設定読み込みエラー:', error);
+    }
+}
+
+// ========================================
+// 🔥 設定をサーバーに保存
+// ========================================
+async function saveUserSettings(settings) {
+    try {
+        const response = await fetch('/api/user-settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+        const data = await response.json();
+        if (!data.success) {
+            console.error('設定保存エラー:', data.error);
+        }
+    } catch (error) {
+        console.error('設定保存エラー:', error);
+    }
+}
+
+// ========================================
+// 🔥 シンプルモード切替
+// ========================================
+function toggleSimpleMode() {
+    simpleMode = !simpleMode;
+    saveUserSettings({ simple_mode: simpleMode });
+    updateSimpleModeUI();
+    showScannerToast(simpleMode ? '📦 シンプルモード ON' : '📋 通常モード', 'info');
+}
+
+// ========================================
+// 🔥 シンプルモードUIの更新
+// ========================================
+function updateSimpleModeUI() {
+    const btn = document.getElementById('simpleModeToggle');
+    if (btn) {
+        if (simpleMode) {
+            btn.style.background = '#28a745';
+            btn.style.color = '#fff';
+            btn.textContent = '📦 シンプル';
+        } else {
+            btn.style.background = '';
+            btn.style.color = '';
+            btn.textContent = '📋 通常';
+        }
+    }
+}
+
+// ========================================
+// 🔥 箱QRコードの検出
+// ========================================
+function isBoxQRCode(data) {
+    // 箱QRコードのパターン: PALLET:P001, BOX:P001, P001, D001, T001
+    const boxPatterns = [
+        /^PALLET:/i,
+        /^BOX:/i,
+        /^[PDT]\d{3}$/i
+    ];
+    return boxPatterns.some(pattern => pattern.test(data));
+}
+
+// ========================================
+// 🔥 箱QRコードから箱番号を抽出
+// ========================================
+function extractBoxNumber(data) {
+    if (data.toUpperCase().startsWith('PALLET:')) {
+        return data.substring(7).trim().toUpperCase();
+    } else if (data.toUpperCase().startsWith('BOX:')) {
+        return data.substring(4).trim().toUpperCase();
+    } else if (/^[PDT]\d{3}$/i.test(data)) {
+        return data.toUpperCase();
+    }
+    return null;
+}
+
+// ========================================
+// 🔥 箱QRコードを処理（シンプルモード時）
+// ========================================
+async function processBoxQRCode(boxNumber) {
+    showScannerToast(`📦 箱スキャン: ${boxNumber}`, 'info');
+
+    // 正しい箱の確認待ちの場合
+    if (currentExpectedBox && pendingReceiveDetail) {
+        if (boxNumber === currentExpectedBox) {
+            // 正しい箱 → 受入実行
+            showScannerToast(`✅ 正しい箱: ${boxNumber}`, 'success');
+            playBeep(true);
+            await executeConfirmedReceive(pendingReceiveDetail.id, pendingReceiveDetail.orderNumber);
+            currentExpectedBox = null;
+            pendingReceiveDetail = null;
+        } else {
+            // 違う箱
+            showScannerToast(`❌ 違う箱です: ${boxNumber}（正: ${currentExpectedBox}）`, 'error');
+            playBeep(false);
+            resumeScanning();
+        }
+        return;
+    }
+
+    // 通常の箱スキャン → 未受入部品リストを表示
+    try {
+        const response = await fetch(`/api/box/${boxNumber}/unreceived-parts`);
+        const data = await response.json();
+
+        if (data.success) {
+            showBoxPartsModal(boxNumber, data);
+        } else {
+            showScannerToast(`❌ エラー: ${data.error}`, 'error');
+            playBeep(false);
+            resumeScanning();
+        }
+    } catch (error) {
+        console.error('箱情報取得エラー:', error);
+        showScannerToast(`❌ エラー: ${boxNumber}`, 'error');
+        playBeep(false);
+        resumeScanning();
+    }
+}
+
+// ========================================
+// 🔥 箱の未受入部品リストモーダルを表示
+// ========================================
+function showBoxPartsModal(boxNumber, data) {
+    const modalBody = document.getElementById('barcodeReceiveModalBody');
+
+    if (!data.found || data.parts.length === 0) {
+        let html = `
+            <div style="text-align: center; padding: 20px;">
+                <div style="font-size: 2.5em; margin-bottom: 15px;">📦</div>
+                <h3 style="margin: 0 0 10px;">箱: ${boxNumber}</h3>
+                <p style="color: #6c757d; font-size: 0.95em;">
+                    ${data.found
+                        ? `✅ この箱の部品は全て受入完了です<br>(合計 ${data.summary.total} 件)`
+                        : '⚠️ この箱に紐づく製番がありません'}
+                </p>
+            </div>
+            <button class="btn btn-primary" onclick="closeBarcodeReceiveAndResume()" style="width: 100%; margin-top: 15px;">
+                スキャンに戻る
+            </button>
+        `;
+        modalBody.innerHTML = html;
+        document.getElementById('barcodeReceiveModal').classList.add('show');
+        return;
+    }
+
+    // 未受入部品リストを表示
+    let html = `
+        <div style="text-align: center; margin-bottom: 15px;">
+            <div style="font-size: 1.5em; margin-bottom: 5px;">📦 ${boxNumber}</div>
+            <h3 style="margin: 0; color: #333;">この箱に届く予定の部品リスト</h3>
+            <p style="color: #6c757d; margin: 5px 0; font-size: 0.9em;">
+                未受入: ${data.summary.unreceived}件 / 合計: ${data.summary.total}件
+            </p>
+        </div>
+        <div style="max-height: 60vh; overflow-y: auto;">
+    `;
+
+    data.parts.forEach((part, index) => {
+        html += `
+            <div id="boxPartItem_${part.id}" style="background: #fff3cd; border: 2px solid #ffc107; border-radius: 10px; padding: 12px; margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <span style="font-weight: bold; font-size: 0.85em; color: #666;">${part.seiban}</span>
+                    <span style="font-size: 0.8em; color: #888;">${part.delivery_date || '納期未定'}</span>
+                </div>
+                <div style="font-weight: bold; margin-bottom: 5px;">${part.item_name || '-'}</div>
+                <table style="width: 100%; font-size: 0.85em;">
+                    <tr><td style="color:#666; width:60px;">仕様1:</td><td>${part.spec1 || '-'}</td></tr>
+                    <tr><td style="color:#666;">数量:</td><td><strong>${part.quantity || '-'} ${part.unit_measure || ''}</strong></td></tr>
+                    <tr><td style="color:#666;">発注番号:</td><td>${part.order_number || '-'}</td></tr>
+                </table>
+                <button class="btn btn-success" id="boxReceiveBtn_${part.id}"
+                        onclick="executeBoxPartReceive(${part.id}, '${part.order_number}', '${boxNumber}')"
+                        style="width: 100%; margin-top: 8px; padding: 10px; font-size: 1em;">
+                    受入する
+                </button>
+            </div>
+        `;
+    });
+
+    html += `</div>`;
+
+    // 全て受入ボタン
+    if (data.parts.length >= 2) {
+        const partIds = data.parts.map(p => p.id).join(',');
+        html += `
+            <button class="btn btn-success" id="boxReceiveAllBtn"
+                    onclick="executeAllBoxPartReceive('${boxNumber}', [${partIds}])"
+                    style="width: 100%; margin-top: 10px; padding: 12px; font-size: 1.05em; font-weight: bold;">
+                全て受入する（${data.parts.length}件）
+            </button>
+        `;
+    }
+
+    html += `
+        <button class="btn btn-secondary" onclick="closeBarcodeReceiveAndResume()" style="width: 100%; margin-top: 8px;">
+            スキャンに戻る
+        </button>
+    `;
+
+    modalBody.innerHTML = html;
+    document.getElementById('barcodeReceiveModal').classList.add('show');
+}
+
+// ========================================
+// 🔥 箱部品の受入実行
+// ========================================
+async function executeBoxPartReceive(detailId, orderNumber, boxNumber) {
+    const btn = document.getElementById(`boxReceiveBtn_${detailId}`);
+    if (btn) { btn.disabled = true; btn.textContent = '処理中...'; }
+
+    try {
+        const response = await fetch(`/api/detail/${detailId}/toggle-receive`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_received: true })
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            playBeep(true);
+            if (navigator.vibrate) navigator.vibrate(CONFIG.VIBRATION_PATTERN);
+
+            // アイテム表示を更新
+            const itemDiv = document.getElementById(`boxPartItem_${detailId}`);
+            if (itemDiv) {
+                itemDiv.style.background = '#d4edda';
+                itemDiv.style.borderColor = '#28a745';
+                if (btn) btn.remove();
+                const doneLabel = document.createElement('div');
+                doneLabel.style.cssText = 'color:#28a745; font-weight:bold; margin-top:5px; font-size:0.9em;';
+                doneLabel.textContent = '✅ 受入完了';
+                itemDiv.appendChild(doneLabel);
+            }
+
+            processedOrderNumbers.add(orderNumber);
+        } else {
+            if (btn) { btn.disabled = false; btn.textContent = '受入する'; }
+            showScannerToast(`❌ 受入失敗: ${orderNumber}`, 'error');
+        }
+    } catch (error) {
+        console.error('受入エラー:', error);
+        if (btn) { btn.disabled = false; btn.textContent = '受入する'; }
+    }
+}
+
+// ========================================
+// 🔥 箱の全部品一括受入
+// ========================================
+async function executeAllBoxPartReceive(boxNumber, detailIds) {
+    const allBtn = document.getElementById('boxReceiveAllBtn');
+    if (allBtn) { allBtn.disabled = true; allBtn.textContent = '処理中...'; }
+
+    let successCount = 0;
+    for (const detailId of detailIds) {
+        try {
+            const response = await fetch(`/api/detail/${detailId}/toggle-receive`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ is_received: true })
+            });
+            const data = await response.json();
+            if (data.success) {
+                successCount++;
+                // アイテム表示を更新
+                const itemDiv = document.getElementById(`boxPartItem_${detailId}`);
+                if (itemDiv) {
+                    itemDiv.style.background = '#d4edda';
+                    itemDiv.style.borderColor = '#28a745';
+                    const btn = document.getElementById(`boxReceiveBtn_${detailId}`);
+                    if (btn) btn.remove();
+                    const doneLabel = document.createElement('div');
+                    doneLabel.style.cssText = 'color:#28a745; font-weight:bold; margin-top:5px; font-size:0.9em;';
+                    doneLabel.textContent = '✅ 受入完了';
+                    itemDiv.appendChild(doneLabel);
+                }
+            }
+        } catch (e) { console.error('一括受入エラー:', e); }
+    }
+
+    if (successCount > 0) {
+        playBeep(true);
+        if (navigator.vibrate) navigator.vibrate(CONFIG.VIBRATION_PATTERN);
+    }
+
+    // 完了メッセージ
+    const modalBody = document.getElementById('barcodeReceiveModalBody');
+    let countdown = 3;
+    modalBody.innerHTML = `
+        <div style="text-align: center; padding: 30px;">
+            <div style="font-size: 3em; margin-bottom: 15px;">📦✅</div>
+            <h3 style="color: #28a745; margin-bottom: 10px;">受入完了</h3>
+            <p style="color: #6c757d; font-size: 0.95em;">箱 ${boxNumber}: ${successCount}/${detailIds.length}件 受入完了</p>
+            <p id="countdownText" style="color: #6c757d; font-size: 0.9em; margin-top: 15px;">${countdown}秒後に自動でスキャン画面に戻ります</p>
+            <button class="btn" onclick="cancelAutoResume()" style="background: #ffc107; color: #000; padding: 10px 30px; font-size: 1em; margin-top: 10px; font-weight: bold;">
+                🟨 キャンセル
+            </button>
+        </div>
+    `;
+
+    // カウントダウンタイマー
+    window.autoResumeTimer = setInterval(() => {
+        countdown--;
+        const countdownEl = document.getElementById('countdownText');
+        if (countdownEl) {
+            countdownEl.textContent = `${countdown}秒後に自動でスキャン画面に戻ります`;
+        }
+        if (countdown <= 0) {
+            clearInterval(window.autoResumeTimer);
+            closeBarcodeReceiveAndResume();
+        }
+    }, 1000);
+}
+
+// ========================================
+// 🔥 「正しい箱に入れる」機能 - 箱QRスキャンを促す
+// ========================================
+function promptCorrectBoxScan(expectedBox, detail, orderNumber) {
+    currentExpectedBox = expectedBox;
+    pendingReceiveDetail = { id: detail.id, orderNumber: orderNumber, detail: detail };
+
+    const modalBody = document.getElementById('barcodeReceiveModalBody');
+    modalBody.innerHTML = `
+        <div style="text-align: center; padding: 20px;">
+            <div style="font-size: 3em; margin-bottom: 15px;">📦🔍</div>
+            <h3 style="color: #0066cc; margin-bottom: 10px;">正しい箱をスキャン</h3>
+            <p style="color: #333; font-size: 1em; margin-bottom: 5px;">
+                この部品は <strong style="font-size: 1.3em; color: #0066cc;">${expectedBox}</strong> に入れてください
+            </p>
+            <div style="background: #e7f3ff; border: 2px solid #0066cc; border-radius: 10px; padding: 15px; margin: 15px 0;">
+                <table style="width: 100%; font-size: 0.9em; text-align: left;">
+                    <tr><td style="font-weight:bold; width:70px;">発注番号:</td><td>${orderNumber}</td></tr>
+                    <tr><td style="font-weight:bold;">品名:</td><td>${detail.item_name || '-'}</td></tr>
+                    <tr><td style="font-weight:bold;">数量:</td><td>${detail.quantity || '-'} ${detail.unit_measure || ''}</td></tr>
+                </table>
+            </div>
+            <p style="color: #666; font-size: 0.9em;">箱 <strong>${expectedBox}</strong> のQRコードをスキャンしてください</p>
+        </div>
+        <div style="display: flex; gap: 10px; margin-top: 15px;">
+            <button class="btn btn-warning" onclick="forceReceiveWithoutBoxCheck(${detail.id}, '${orderNumber}')"
+                    style="flex: 1; padding: 12px; font-size: 1em;">
+                ⚠️ 確認せず受入
+            </button>
+            <button class="btn btn-secondary" onclick="cancelCorrectBoxScan()"
+                    style="flex: 1; padding: 12px; font-size: 1em;">
+                キャンセル
+            </button>
+        </div>
+    `;
+
+    document.getElementById('barcodeReceiveModal').classList.add('show');
+    // スキャナーは一時停止のまま、箱QRを待つ
+    isScannerPaused = false;  // 箱QRをスキャンできるように再開
+}
+
+// ========================================
+// 🔥 箱確認をスキップして受入
+// ========================================
+async function forceReceiveWithoutBoxCheck(detailId, orderNumber) {
+    currentExpectedBox = null;
+    pendingReceiveDetail = null;
+    await executeConfirmedReceive(detailId, orderNumber);
+}
+
+// ========================================
+// 🔥 正しい箱スキャンをキャンセル
+// ========================================
+function cancelCorrectBoxScan() {
+    currentExpectedBox = null;
+    pendingReceiveDetail = null;
+    document.getElementById('barcodeReceiveModal').classList.remove('show');
+    resumeScanning();
+}
+
+// ========================================
+// 🔥 部品が違う箱に届いた場合のポップアップ
+// ========================================
+function showWrongBoxPopup(orderNumber, detail, scannedBox, correctBox) {
+    const modalBody = document.getElementById('barcodeReceiveModalBody');
+    modalBody.innerHTML = `
+        <div style="text-align: center; padding: 15px;">
+            <div style="font-size: 2.5em; margin-bottom: 10px;">⚠️</div>
+            <h3 style="color: #dc3545; margin-bottom: 10px;">箱が違います</h3>
+            <p style="color: #333; margin-bottom: 15px;">
+                この部品は <strong style="color: #0066cc;">${correctBox}</strong> の箱に入れる必要があります
+            </p>
+        </div>
+        <div style="background: #f8f9fa; border: 2px solid #dee2e6; border-radius: 10px; padding: 15px; margin-bottom: 15px;">
+            <table style="width: 100%; font-size: 0.9em;">
+                <tr><td style="font-weight:bold; width:80px;">発注番号:</td><td>${orderNumber}</td></tr>
+                <tr><td style="font-weight:bold;">品名:</td><td>${detail.item_name || '-'}</td></tr>
+                <tr><td style="font-weight:bold;">仕様1:</td><td>${detail.spec1 || '-'}</td></tr>
+                <tr><td style="font-weight:bold;">数量:</td><td>${detail.quantity || '-'} ${detail.unit_measure || ''}</td></tr>
+                <tr style="background: #ffe6e6;"><td style="font-weight:bold;">現在の箱:</td><td style="color: #dc3545; font-weight: bold;">${scannedBox || '未設定'}</td></tr>
+                <tr style="background: #e6f7ff;"><td style="font-weight:bold;">正しい箱:</td><td style="color: #0066cc; font-weight: bold;">${correctBox}</td></tr>
+            </table>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+            <button class="btn btn-primary" onclick="promptCorrectBoxScan('${correctBox}', ${JSON.stringify(detail).replace(/'/g, "\\'")}, '${orderNumber}')"
+                    style="padding: 12px; font-size: 1em; font-weight: bold;">
+                📦 正しい箱に入れる
+            </button>
+            <button class="btn btn-warning" onclick="forceReceiveWithoutBoxCheck(${detail.id}, '${orderNumber}')"
+                    style="padding: 12px; font-size: 1em;">
+                ⚠️ このまま受入する
+            </button>
+            <button class="btn btn-secondary" onclick="cancelReceiveAndResume()"
+                    style="padding: 10px; font-size: 0.95em;">
+                キャンセル
+            </button>
+        </div>
+    `;
+
+    document.getElementById('barcodeReceiveModal').classList.add('show');
+}
+
+// ページ読み込み時に設定を読み込み
+document.addEventListener('DOMContentLoaded', function() {
+    loadUserSettings();
+});
