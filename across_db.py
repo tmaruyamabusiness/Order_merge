@@ -902,6 +902,11 @@ def check_db_updates(stored_snapshot=None):
     new_seibans = list(curr_seibans - prev_seibans)
     tehai_count_diff = current['tehai']['count'] - prev['tehai'].get('count', 0)
 
+    # 新規製番の詳細を取得
+    new_tehai_details = []
+    if new_seibans and len(new_seibans) <= 50:  # 50件以下なら詳細取得
+        new_tehai_details = get_new_tehai_details(list(new_seibans)[:20])
+
     if new_seibans:
         has_updates = True
         messages.append(f"新規製番: {', '.join(sorted(new_seibans)[:5])}")
@@ -950,6 +955,7 @@ def check_db_updates(stored_snapshot=None):
         'is_first_check': False,
         'tehai_changes': {
             'new_seibans': sorted(new_seibans),
+            'new_tehai_details': new_tehai_details,  # 詳細情報
             'count_diff': tehai_count_diff
         },
         'hacchu_changes': {
@@ -1015,6 +1021,63 @@ def get_new_order_details(order_numbers):
         return details
     except Exception as e:
         print(f"発注詳細取得エラー: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_new_tehai_details(seibans):
+    """
+    製番リストから手配リスト詳細を取得
+
+    Args:
+        seibans: 製番のリスト
+
+    Returns:
+        list: [{'製番': str, '品名': str, '仕様１': str, '手配数': int, '単位': str, '手配区分': str}, ...]
+    """
+    if not seibans:
+        return []
+
+    conn = None
+    try:
+        conn, cursor = get_connection()
+
+        # IN句用のプレースホルダー作成
+        placeholders = ','.join(['?' for _ in seibans])
+
+        sql = f"""
+            SELECT 製番, 品名, 仕様１, 手配数, 単位, 手配区分, メーカー
+            FROM dbo.[V_D手配リスト]
+            WHERE 製番 IN ({placeholders})
+            ORDER BY 製番, ページNo, 行No
+        """
+
+        cursor.execute(sql, list(seibans))
+        rows = cursor.fetchall()
+
+        # 製番ごとにグループ化して代表行を返す
+        seiban_details = {}
+        for row in rows:
+            seiban = format_value(row[0])
+            if seiban not in seiban_details:
+                seiban_details[seiban] = {
+                    '製番': seiban,
+                    '品名': format_value(row[1]),
+                    '仕様１': format_value(row[2]),
+                    '手配数': format_value(row[3]),
+                    '単位': format_value(row[4]),
+                    '手配区分': format_value(row[5]),
+                    'メーカー': format_value(row[6]),
+                    '件数': 1
+                }
+            else:
+                seiban_details[seiban]['件数'] += 1
+
+        return list(seiban_details.values())[:20]  # 最大20件
+    except Exception as e:
+        print(f"手配詳細取得エラー: {e}")
         return []
     finally:
         if conn:
