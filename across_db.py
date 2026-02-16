@@ -769,6 +769,7 @@ def test_connection():
 _db_snapshot = {
     'tehai': {'count': 0, 'seibans': set()},
     'hacchu': {'count': 0, 'latest_numbers': set()},
+    'shiire': {'count': 0, 'latest_keys': set()},  # 仕入（検収）追加
     'last_check': None
 }
 
@@ -811,6 +812,24 @@ def get_db_status():
         hacchu_rows = cursor.fetchall()
         latest_hacchu = {str(row[0]).strip() if row[0] else '' for row in hacchu_rows}
 
+        # 仕入（検収）の件数を取得
+        cursor.execute("SELECT COUNT(*) FROM dbo.[V_D仕入]")
+        shiire_count = cursor.fetchone()[0]
+
+        # 最新の仕入データ（直近100件）- 発注番号+納入日でユニークキー
+        cursor.execute("""
+            SELECT TOP 100 発注番号, 納入日, 納入数
+            FROM dbo.[V_D仕入]
+            ORDER BY 納入日 DESC, 発注番号 DESC
+        """)
+        shiire_rows = cursor.fetchall()
+        # 発注番号+納入日をキーとして保存
+        latest_shiire = set()
+        for row in shiire_rows:
+            order_num = str(row[0]).strip() if row[0] else ''
+            date_val = str(row[1]) if row[1] else ''
+            latest_shiire.add(f"{order_num}|{date_val}")
+
         return {
             'success': True,
             'tehai': {
@@ -821,6 +840,10 @@ def get_db_status():
             'hacchu': {
                 'count': hacchu_count,
                 'latest_numbers': latest_hacchu
+            },
+            'shiire': {
+                'count': shiire_count,
+                'latest_keys': latest_shiire
             },
             'timestamp': datetime.now()
         }
@@ -875,6 +898,10 @@ def check_db_updates(stored_snapshot=None):
                 'count': current['hacchu']['count'],
                 'latest_numbers': current['hacchu']['latest_numbers']
             },
+            'shiire': {
+                'count': current['shiire']['count'],
+                'latest_keys': current['shiire']['latest_keys']
+            },
             'last_check': current['timestamp']
         }
         return {
@@ -883,11 +910,13 @@ def check_db_updates(stored_snapshot=None):
             'is_first_check': True,
             'tehai_changes': {'new_seibans': [], 'count_diff': 0},
             'hacchu_changes': {'new_orders': [], 'count_diff': 0},
+            'shiire_changes': {'new_kenshu': [], 'new_kenshu_details': [], 'count_diff': 0},
             'message': '初回チェック完了（ベースライン設定）',
             'current_snapshot': {
                 'tehai_count': current['tehai']['count'],
                 'tehai_seiban_count': current['tehai']['seiban_count'],
                 'hacchu_count': current['hacchu']['count'],
+                'shiire_count': current['shiire']['count'],
                 'timestamp': current['timestamp'].isoformat()
             }
         }
@@ -936,6 +965,30 @@ def check_db_updates(stored_snapshot=None):
     elif hacchu_count_diff < 0:
         messages.append(f"発注リスト: {hacchu_count_diff}件")
 
+    # 仕入（検収）の変更検出
+    prev_shiire = prev.get('shiire', {}).get('latest_keys', set())
+    curr_shiire = current['shiire']['latest_keys']
+    new_kenshu_keys = list(curr_shiire - prev_shiire)
+    shiire_count_diff = current['shiire']['count'] - prev.get('shiire', {}).get('count', 0)
+
+    # 新規検収の発注番号を抽出
+    new_kenshu_orders = []
+    for key in new_kenshu_keys:
+        order_num = key.split('|')[0] if '|' in key else key
+        if order_num and order_num not in new_kenshu_orders:
+            new_kenshu_orders.append(order_num)
+
+    # 新規検収の詳細を取得
+    new_kenshu_details = []
+    if new_kenshu_orders and len(new_kenshu_orders) <= 50:
+        new_kenshu_details = get_new_kenshu_details(new_kenshu_orders[:20])
+
+    if shiire_count_diff > 0:
+        has_updates = True
+        messages.append(f"検収: +{shiire_count_diff}件")
+    elif shiire_count_diff < 0:
+        messages.append(f"検収: {shiire_count_diff}件")
+
     # スナップショット更新
     _db_snapshot = {
         'tehai': {
@@ -945,6 +998,10 @@ def check_db_updates(stored_snapshot=None):
         'hacchu': {
             'count': current['hacchu']['count'],
             'latest_numbers': current['hacchu']['latest_numbers']
+        },
+        'shiire': {
+            'count': current['shiire']['count'],
+            'latest_keys': current['shiire']['latest_keys']
         },
         'last_check': current['timestamp']
     }
@@ -963,11 +1020,17 @@ def check_db_updates(stored_snapshot=None):
             'new_order_details': new_order_details,  # 詳細情報
             'count_diff': hacchu_count_diff
         },
+        'shiire_changes': {
+            'new_kenshu': sorted(new_kenshu_orders)[:20],  # 最大20件
+            'new_kenshu_details': new_kenshu_details,  # 詳細情報
+            'count_diff': shiire_count_diff
+        },
         'message': ' / '.join(messages) if messages else '変更なし',
         'current_snapshot': {
             'tehai_count': current['tehai']['count'],
             'tehai_seiban_count': current['tehai']['seiban_count'],
             'hacchu_count': current['hacchu']['count'],
+            'shiire_count': current['shiire']['count'],
             'timestamp': current['timestamp'].isoformat()
         }
     }
@@ -1078,6 +1141,60 @@ def get_new_tehai_details(seibans):
         return list(seiban_details.values())[:20]  # 最大20件
     except Exception as e:
         print(f"手配詳細取得エラー: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_new_kenshu_details(order_numbers):
+    """
+    発注番号リストから検収（仕入）詳細を取得
+
+    Args:
+        order_numbers: 発注番号のリスト
+
+    Returns:
+        list: [{'発注番号': str, '製番': str, '品名': str, '納入日': str, '納入数': int, '仕入先': str}, ...]
+    """
+    if not order_numbers:
+        return []
+
+    conn = None
+    try:
+        conn, cursor = get_connection()
+
+        # IN句用のプレースホルダー作成
+        placeholders = ','.join(['?' for _ in order_numbers])
+        # 8桁ゼロパディング
+        padded_numbers = [str(n).zfill(8) for n in order_numbers]
+
+        sql = f"""
+            SELECT 発注番号, 製番, 品名, 仕様１, 納入日, 納入数, 単位, 仕入先略称
+            FROM dbo.[V_D仕入]
+            WHERE 発注番号 IN ({placeholders})
+            ORDER BY 納入日 DESC, 発注番号 DESC
+        """
+
+        cursor.execute(sql, padded_numbers)
+        rows = cursor.fetchall()
+
+        details = []
+        for row in rows:
+            details.append({
+                '発注番号': format_value(row[0]),
+                '製番': format_value(row[1]),
+                '品名': format_value(row[2]),
+                '仕様１': format_value(row[3]),
+                '納入日': format_value(row[4]),
+                '納入数': format_value(row[5]),
+                '単位': format_value(row[6]),
+                '仕入先': format_value(row[7])
+            })
+
+        return details[:20]  # 最大20件
+    except Exception as e:
+        print(f"検収詳細取得エラー: {e}")
         return []
     finally:
         if conn:

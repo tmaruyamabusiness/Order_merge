@@ -1256,6 +1256,9 @@
                 if (result.hacchu_changes?.count_diff > 0) {
                     messages.push(`発注 +${result.hacchu_changes.count_diff}件`);
                 }
+                if (result.shiire_changes?.count_diff > 0) {
+                    messages.push(`検収 +${result.shiire_changes.count_diff}件`);
+                }
 
                 messageEl.textContent = messages.join(' / ') || result.message;
                 timeEl.textContent = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
@@ -1265,6 +1268,7 @@
                 detailsBody.innerHTML = '';
                 const tehaiDetails = result.tehai_changes?.new_tehai_details || [];
                 const hacchuDetails = result.hacchu_changes?.new_order_details || [];
+                const kenshuDetails = result.shiire_changes?.new_kenshu_details || [];
 
                 // 手配リストの詳細を表示
                 if (tehaiDetails.length > 0) {
@@ -1314,8 +1318,34 @@
                     });
                 }
 
-                // どちらも無い場合
-                if (tehaiDetails.length === 0 && hacchuDetails.length === 0) {
+                // 検収リストの詳細を表示
+                if (kenshuDetails.length > 0) {
+                    if (tehaiDetails.length > 0 || hacchuDetails.length > 0) {
+                        const spacerTr = document.createElement('tr');
+                        spacerTr.innerHTML = '<td colspan="6" style="padding:3px;"></td>';
+                        detailsBody.appendChild(spacerTr);
+                    }
+                    const headerTr = document.createElement('tr');
+                    headerTr.innerHTML = '<td colspan="6" style="padding:5px; background:rgba(76,175,80,0.3); font-weight:bold;">✅ 検収（納入）</td>';
+                    detailsBody.appendChild(headerTr);
+
+                    kenshuDetails.forEach(item => {
+                        const tr = document.createElement('tr');
+                        tr.style.borderBottom = '1px solid rgba(255,255,255,0.1)';
+                        tr.innerHTML = `
+                            <td style="padding:5px;">${item['製番'] || '-'}</td>
+                            <td style="padding:5px;">${item['品名'] || '-'}</td>
+                            <td style="padding:5px;">${item['仕様１'] || '-'}</td>
+                            <td style="padding:5px; text-align:right;">${item['納入数'] || '-'} ${item['単位'] || ''}</td>
+                            <td style="padding:5px;">${item['仕入先'] || '-'}</td>
+                            <td style="padding:5px;">${item['納入日'] || '-'}</td>
+                        `;
+                        detailsBody.appendChild(tr);
+                    });
+                }
+
+                // すべて無い場合
+                if (tehaiDetails.length === 0 && hacchuDetails.length === 0 && kenshuDetails.length === 0) {
                     detailsBody.innerHTML = '<tr><td colspan="6" style="padding:10px; text-align:center; opacity:0.7;">詳細情報なし</td></tr>';
                 }
 
@@ -1324,11 +1354,15 @@
                 // ブラウザ通知（許可されている場合）
                 if (Notification.permission === 'granted') {
                     let notifyBody = messages.join(' / ') || result.message;
-                    // 手配リストの詳細を優先表示
+                    // 手配リスト→検収→発注の順で優先表示
                     if (tehaiDetails.length > 0) {
                         const firstItem = tehaiDetails[0];
                         notifyBody += `\n${firstItem['製番']} ${firstItem['品名']}`;
                         if (tehaiDetails.length > 1) notifyBody += ` 他${tehaiDetails.length - 1}件`;
+                    } else if (kenshuDetails.length > 0) {
+                        const firstItem = kenshuDetails[0];
+                        notifyBody += `\n検収: ${firstItem['製番']} ${firstItem['品名']} ${firstItem['納入数']}${firstItem['単位'] || ''}`;
+                        if (kenshuDetails.length > 1) notifyBody += ` 他${kenshuDetails.length - 1}件`;
                     } else if (hacchuDetails.length > 0) {
                         const firstItem = hacchuDetails[0];
                         notifyBody += `\n${firstItem['製番']} ${firstItem['品名']}`;
