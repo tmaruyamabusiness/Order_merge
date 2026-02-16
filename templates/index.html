@@ -1263,9 +1263,43 @@
 
                 // 詳細テーブルを構築
                 detailsBody.innerHTML = '';
-                const details = result.hacchu_changes?.new_order_details || [];
-                if (details.length > 0) {
-                    details.forEach(item => {
+                const tehaiDetails = result.tehai_changes?.new_tehai_details || [];
+                const hacchuDetails = result.hacchu_changes?.new_order_details || [];
+
+                // 手配リストの詳細を表示
+                if (tehaiDetails.length > 0) {
+                    const headerTr = document.createElement('tr');
+                    headerTr.innerHTML = '<td colspan="6" style="padding:5px; background:rgba(255,255,255,0.2); font-weight:bold;">📦 手配リスト</td>';
+                    detailsBody.appendChild(headerTr);
+
+                    tehaiDetails.forEach(item => {
+                        const tr = document.createElement('tr');
+                        tr.style.borderBottom = '1px solid rgba(255,255,255,0.1)';
+                        const itemCount = item['件数'] > 1 ? ` (${item['件数']}行)` : '';
+                        tr.innerHTML = `
+                            <td style="padding:5px;">${item['製番'] || '-'}${itemCount}</td>
+                            <td style="padding:5px;">${item['品名'] || '-'}</td>
+                            <td style="padding:5px;">${item['仕様１'] || '-'}</td>
+                            <td style="padding:5px; text-align:right;">${item['手配数'] || '-'} ${item['単位'] || ''}</td>
+                            <td style="padding:5px;">${item['メーカー'] || '-'}</td>
+                            <td style="padding:5px;">${item['手配区分'] || '-'}</td>
+                        `;
+                        detailsBody.appendChild(tr);
+                    });
+                }
+
+                // 発注リストの詳細を表示
+                if (hacchuDetails.length > 0) {
+                    if (tehaiDetails.length > 0) {
+                        const spacerTr = document.createElement('tr');
+                        spacerTr.innerHTML = '<td colspan="6" style="padding:3px;"></td>';
+                        detailsBody.appendChild(spacerTr);
+                    }
+                    const headerTr = document.createElement('tr');
+                    headerTr.innerHTML = '<td colspan="6" style="padding:5px; background:rgba(255,255,255,0.2); font-weight:bold;">📝 発注リスト</td>';
+                    detailsBody.appendChild(headerTr);
+
+                    hacchuDetails.forEach(item => {
                         const tr = document.createElement('tr');
                         tr.style.borderBottom = '1px solid rgba(255,255,255,0.1)';
                         tr.innerHTML = `
@@ -1278,7 +1312,10 @@
                         `;
                         detailsBody.appendChild(tr);
                     });
-                } else {
+                }
+
+                // どちらも無い場合
+                if (tehaiDetails.length === 0 && hacchuDetails.length === 0) {
                     detailsBody.innerHTML = '<tr><td colspan="6" style="padding:10px; text-align:center; opacity:0.7;">詳細情報なし</td></tr>';
                 }
 
@@ -1287,10 +1324,15 @@
                 // ブラウザ通知（許可されている場合）
                 if (Notification.permission === 'granted') {
                     let notifyBody = messages.join(' / ') || result.message;
-                    if (details.length > 0) {
-                        const firstItem = details[0];
+                    // 手配リストの詳細を優先表示
+                    if (tehaiDetails.length > 0) {
+                        const firstItem = tehaiDetails[0];
                         notifyBody += `\n${firstItem['製番']} ${firstItem['品名']}`;
-                        if (details.length > 1) notifyBody += ` 他${details.length - 1}件`;
+                        if (tehaiDetails.length > 1) notifyBody += ` 他${tehaiDetails.length - 1}件`;
+                    } else if (hacchuDetails.length > 0) {
+                        const firstItem = hacchuDetails[0];
+                        notifyBody += `\n${firstItem['製番']} ${firstItem['品名']}`;
+                        if (hacchuDetails.length > 1) notifyBody += ` 他${hacchuDetails.length - 1}件`;
                     }
                     new Notification('DB更新検知', {
                         body: notifyBody,
