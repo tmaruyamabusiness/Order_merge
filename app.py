@@ -2422,8 +2422,16 @@ def across_db_query():
             if search_type == '発注番号':
                 # ゼロパディング対応
                 search_value = search_value.zfill(8)
-            where_clause = f'{search_type} = ?'
-            params = [search_value]
+                where_clause = f'{search_type} = ?'
+                params = [search_value]
+            elif search_type in ('品名', '仕様１'):
+                # 部分一致検索
+                where_clause = f'{search_type} LIKE ?'
+                params = [f'%{search_value}%']
+            else:
+                # 完全一致検索（製番、品目CD など）
+                where_clause = f'{search_type} = ?'
+                params = [search_value]
 
         result = across_db.query_view(view_name, where_clause, params, limit)
         return jsonify(result)

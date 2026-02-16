@@ -34,10 +34,16 @@ function onAcrossViewChange() {
     if (view === 'V_D発注' || view === 'V_D発注残' || view === 'V_D仕入') {
         searchType.innerHTML += '<option value="発注番号">発注番号</option>';
         searchType.innerHTML += '<option value="製番">製番</option>';
-        searchInput.placeholder = '例: 89074 または MHT0620';
+        searchType.innerHTML += '<option value="品目CD">品目CD</option>';
+        searchType.innerHTML += '<option value="品名">品名（部分一致）</option>';
+        searchType.innerHTML += '<option value="仕様１">仕様１（部分一致）</option>';
+        searchInput.placeholder = '例: 89074, MHT0620, 品名の一部';
     } else if (view === 'V_D手配リスト' || view === 'V_D未発注') {
         searchType.innerHTML += '<option value="製番">製番</option>';
-        searchInput.placeholder = '例: MHT0620';
+        searchType.innerHTML += '<option value="品目CD">品目CD</option>';
+        searchType.innerHTML += '<option value="品名">品名（部分一致）</option>';
+        searchType.innerHTML += '<option value="仕様１">仕様１（部分一致）</option>';
+        searchInput.placeholder = '例: MHT0620, 品名の一部';
     }
 
     searchType.innerHTML += '<option value="">全件（上位100件）</option>';
