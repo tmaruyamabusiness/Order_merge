@@ -54,7 +54,7 @@ class EmailSender:
         """
         
         # 🔥 件名を簡潔に（製番のみ）
-        subject = f"【納品完了】{seiban}_{unit if unit else '（ユニット名無し）'}({customer_abbr})"
+        subject = f"【調達完了】{seiban}_{unit if unit else '（ユニット名無し）'}({customer_abbr})"
         
         # 🔥 概要作成（product_nameを優先、なければmemo2）
         overview = product_name if product_name else (memo2 if memo2 else '（情報なし）')
@@ -69,7 +69,7 @@ class EmailSender:
         location_text = ''.join(location_parts) if location_parts else '未設定'
         
         # パレットラベルの注意書き
-        pallet_note = '\n※パレット側面にラベル貼付有' if location_parts else ''
+        pallet_note = '\n※ラベル貼付有' if location_parts else ''
         
         # 🔥 excel_pathが渡されていない場合のフォールバック
         if not excel_path:
@@ -79,7 +79,7 @@ class EmailSender:
         body = f"""各位
 お疲れ様です、{sender_name}です
 
-下記製番のユニットの納品が完了しましたのでご連絡します。
+下記製番のユニットの調達/仕分けが完了しましたのでご連絡します。
 
 製番：{seiban}
 概要：{overview}
@@ -154,7 +154,7 @@ class EmailSender:
         sender_name: str = '丸山'
     ) -> bool:
         """
-        納品完了メールを作成してメーラーを起動（オールインワン関数）
+        調達完了メールを作成してメーラーを起動（オールインワン関数）
         
         Args:
             seiban: 製番
