@@ -2977,6 +2977,62 @@ def get_archived_orders():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/receive-history')
+def get_receive_history():
+    """受入履歴を取得"""
+    try:
+        q = request.args.get('q', '').strip()
+        start_date = request.args.get('start_date', '')
+        end_date = request.args.get('end_date', '')
+        status = request.args.get('status', 'all')  # all / received / cancelled
+        limit = min(int(request.args.get('limit', 500)), 1000)
+
+        query = ReceivedHistory.query
+
+        if q:
+            query = query.filter(
+                db.or_(
+                    ReceivedHistory.order_number.ilike(f'%{q}%'),
+                    ReceivedHistory.item_name.ilike(f'%{q}%')
+                )
+            )
+        if start_date:
+            try:
+                from datetime import datetime as dt
+                query = query.filter(ReceivedHistory.received_at >= dt.strptime(start_date, '%Y-%m-%d'))
+            except ValueError:
+                pass
+        if end_date:
+            try:
+                from datetime import datetime as dt, timedelta
+                end_dt = dt.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+                query = query.filter(ReceivedHistory.received_at < end_dt)
+            except ValueError:
+                pass
+        if status == 'received':
+            query = query.filter(ReceivedHistory.is_received == True)
+        elif status == 'cancelled':
+            query = query.filter(ReceivedHistory.is_received == False)
+
+        records = query.order_by(ReceivedHistory.received_at.desc()).limit(limit).all()
+
+        result = []
+        for r in records:
+            result.append({
+                'id': r.id,
+                'order_number': r.order_number or '',
+                'item_name': r.item_name or '',
+                'spec1': r.spec1 or '',
+                'quantity': r.quantity,
+                'received_quantity': r.received_quantity,
+                'is_received': r.is_received,
+                'received_at': r.received_at.strftime('%Y/%m/%d %H:%M') if r.received_at else '',
+                'cancelled_at': r.cancelled_at.strftime('%Y/%m/%d %H:%M') if r.cancelled_at else '',
+            })
+        return jsonify({'success': True, 'records': result, 'total': len(result)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/order/<int:order_id>/archive', methods=['POST'])
 def archive_order(order_id):
     """Archive an order"""

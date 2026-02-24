@@ -1512,6 +1512,34 @@
                 <h2>🗄️ アーカイブ（納品完了）</h2>
                 <p>納品完了してアーカイブされた注文一覧</p>
                 <div id="archiveGrid" class="order-grid"></div>
+
+                <!-- 受入履歴セクション -->
+                <hr style="margin: 30px 0; border: none; border-top: 2px solid #dee2e6;">
+                <div style="margin-top: 10px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+                        <h3 style="margin:0; font-size:1.2em;">📋 受入履歴</h3>
+                        <button onclick="loadReceiveHistory()" style="padding:5px 14px; background:#495057; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.88em;">🔄 読み込み</button>
+                    </div>
+                    <!-- フィルター -->
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; padding:10px 14px; background:#f8f9fa; border-radius:8px;">
+                        <input type="text" id="rhFilterQ" placeholder="発注番号・品名で検索..." onkeydown="if(event.key==='Enter')loadReceiveHistory()" style="padding:5px 10px; border:1px solid #ccc; border-radius:4px; font-size:0.88em; min-width:200px;">
+                        <label style="font-size:0.88em; color:#555; white-space:nowrap;">期間:</label>
+                        <input type="date" id="rhFilterStart" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.88em;">
+                        <span style="color:#999;">〜</span>
+                        <input type="date" id="rhFilterEnd" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.88em;">
+                        <select id="rhFilterStatus" style="padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.88em;">
+                            <option value="all">全て</option>
+                            <option value="received">受入のみ</option>
+                            <option value="cancelled">キャンセルのみ</option>
+                        </select>
+                        <button onclick="loadReceiveHistory()" style="padding:5px 14px; background:#28a745; color:white; border:none; border-radius:4px; cursor:pointer; font-size:0.88em;">検索</button>
+                        <button onclick="clearReceiveHistoryFilters()" style="padding:5px 10px; background:white; border:1px solid #ccc; border-radius:4px; cursor:pointer; font-size:0.88em;">クリア</button>
+                    </div>
+                    <!-- 結果エリア -->
+                    <div id="receiveHistoryContent" style="overflow-x:auto;">
+                        <p style="text-align:center; padding:20px; color:#6c757d;">「読み込み」ボタンを押して受入履歴を表示します</p>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1635,6 +1663,82 @@
             } catch (error) {
                 console.error('Error loading archived orders:', error);
             }
+        }
+
+        // 受入履歴を読み込み・表示
+        async function loadReceiveHistory() {
+            const container = document.getElementById('receiveHistoryContent');
+            if (!container) return;
+            container.innerHTML = '<p style="text-align:center; padding:20px; color:#6c757d;">読み込み中...</p>';
+
+            const q = document.getElementById('rhFilterQ')?.value.trim() || '';
+            const start = document.getElementById('rhFilterStart')?.value || '';
+            const end = document.getElementById('rhFilterEnd')?.value || '';
+            const status = document.getElementById('rhFilterStatus')?.value || 'all';
+
+            const params = new URLSearchParams();
+            if (q) params.append('q', q);
+            if (start) params.append('start_date', start);
+            if (end) params.append('end_date', end);
+            if (status !== 'all') params.append('status', status);
+
+            try {
+                const res = await fetch('/api/receive-history?' + params.toString());
+                const data = await res.json();
+                if (!data.success) {
+                    container.innerHTML = `<p style="color:#dc3545;">エラー: ${data.error}</p>`;
+                    return;
+                }
+                if (data.records.length === 0) {
+                    container.innerHTML = '<p style="text-align:center; padding:20px; color:#6c757d;">該当する受入履歴がありません</p>';
+                    return;
+                }
+
+                let html = `<div style="font-size:0.85em; color:#666; margin-bottom:8px;">${data.total}件</div>`;
+                html += `<table style="width:100%; border-collapse:collapse; font-size:0.88em;">
+                    <thead><tr style="background:#495057; color:white;">
+                        <th style="padding:7px 10px; text-align:left; border-bottom:2px solid #343a40; white-space:nowrap;">受入日時</th>
+                        <th style="padding:7px 10px; text-align:left; border-bottom:2px solid #343a40; white-space:nowrap;">発注番号</th>
+                        <th style="padding:7px 10px; text-align:left; border-bottom:2px solid #343a40;">品名</th>
+                        <th style="padding:7px 10px; text-align:left; border-bottom:2px solid #343a40;">仕様１</th>
+                        <th style="padding:7px 10px; text-align:right; border-bottom:2px solid #343a40; white-space:nowrap;">数量</th>
+                        <th style="padding:7px 10px; text-align:center; border-bottom:2px solid #343a40; white-space:nowrap;">状態</th>
+                    </tr></thead><tbody>`;
+
+                data.records.forEach((r, i) => {
+                    const bg = i % 2 === 0 ? '#ffffff' : '#f8f9fa';
+                    const isReceived = r.is_received;
+                    const statusBadge = isReceived
+                        ? '<span style="background:#28a745; color:white; padding:2px 8px; border-radius:10px; font-size:0.85em;">受入</span>'
+                        : '<span style="background:#dc3545; color:white; padding:2px 8px; border-radius:10px; font-size:0.85em;">キャンセル</span>';
+                    const dateStr = isReceived ? r.received_at : r.cancelled_at;
+                    const qty = r.received_quantity != null ? `${r.received_quantity} / ${r.quantity ?? '-'}` : (r.quantity ?? '-');
+
+                    html += `<tr style="background:${bg}; border-bottom:1px solid #eee;">
+                        <td style="padding:6px 10px; white-space:nowrap;">${dateStr || '-'}</td>
+                        <td style="padding:6px 10px; white-space:nowrap; font-family:monospace;">${r.order_number || '-'}</td>
+                        <td style="padding:6px 10px;">${r.item_name || '-'}</td>
+                        <td style="padding:6px 10px; font-size:0.9em; color:#555;">${r.spec1 || '-'}</td>
+                        <td style="padding:6px 10px; text-align:right;">${qty}</td>
+                        <td style="padding:6px 10px; text-align:center;">${statusBadge}</td>
+                    </tr>`;
+                });
+
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } catch (err) {
+                container.innerHTML = `<p style="color:#dc3545;">読み込みエラー: ${err}</p>`;
+            }
+        }
+
+        function clearReceiveHistoryFilters() {
+            ['rhFilterQ', 'rhFilterStart', 'rhFilterEnd'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            const sel = document.getElementById('rhFilterStatus');
+            if (sel) sel.value = 'all';
+            loadReceiveHistory();
         }
 
         // Archive order
