@@ -604,6 +604,7 @@ let dbDeliveryData = null;
 let dbDsFilters = {
     seiban: '',
     supplier: '',
+    supplierCd: '',
     orderType: '',
     date: ''
 };
@@ -701,7 +702,17 @@ function clearDbDeliveryFilters() {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
-    dbDsFilters = { seiban: '', supplier: '', orderType: '', date: '' };
+    dbDsFilters = { seiban: '', supplier: '', supplierCd: '', orderType: '', date: '' };
+    filterDbDeliveryRows();
+}
+
+// 土田鉄工所（仕入先CD:116）で絞り込む
+function applyTsuchidaFilter() {
+    ['dbDsFilterSeiban', 'dbDsFilterSupplier', 'dbDsFilterOrderType', 'dbDsFilterDate'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    dbDsFilters = { seiban: '', supplier: '', supplierCd: '116', orderType: '', date: '' };
     filterDbDeliveryRows();
 }
 
@@ -711,12 +722,14 @@ function filterDbDeliveryRows() {
     rows.forEach(row => {
         const seiban = (row.dataset.seiban || '').toLowerCase();
         const supplier = (row.dataset.supplier || '').toLowerCase();
+        const supplierCd = row.dataset.suppliercd || '';
         const orderType = (row.dataset.ordertype || '').toLowerCase();
         const rowDate = row.dataset.date || '';
 
         const match =
             (!dbDsFilters.seiban || seiban.includes(dbDsFilters.seiban)) &&
             (!dbDsFilters.supplier || supplier.includes(dbDsFilters.supplier)) &&
+            (!dbDsFilters.supplierCd || supplierCd === dbDsFilters.supplierCd) &&
             (!dbDsFilters.orderType || orderType.includes(dbDsFilters.orderType)) &&
             (!dbDsFilters.date || rowDate === dbDsFilters.date);
 
@@ -803,6 +816,7 @@ function renderDbDeliverySchedule(data) {
     // フィルターバー
     html += `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px; padding:8px 12px; background:#f8f9fa; border-radius:8px;">
         <span style="font-weight:bold; font-size:0.9em;">絞り込み:</span>
+        <button onclick="applyTsuchidaFilter()" style="padding:4px 12px; border:2px solid #6c757d; border-radius:4px; background:#343a40; color:white; cursor:pointer; font-size:0.88em; font-weight:bold; white-space:nowrap;">🔩 土田鉄工所</button>
         <select id="dbDsFilterDate" onchange="applyDbDeliveryFilters()" style="padding:4px 8px; border:1px solid #ccc; border-radius:4px; font-size:0.88em;">
             <option value="">全日付</option>
             ${opts.dates.map(d => `<option value="${d.value}">${d.label}${d.isToday ? ' [今日]' : ''} (${d.count}件)</option>`).join('')}
@@ -878,7 +892,7 @@ function renderDbDeliverySchedule(data) {
                 spec1Cell = `<a href="/api/open-cad-by-spec/${encodeURIComponent(spec1)}" target="_blank" style="color: #0000FF; text-decoration: underline;" title="${spec1}">${spec1}</a>`;
             }
 
-            html += `<tr class="dbds-item-row" data-date="${dateKey}" data-seiban="${item['製番'] || ''}" data-supplier="${item['仕入先'] || ''}" data-ordertype="${item['手配区分'] || ''}" style="background: ${rowBg}; border-bottom: 1px solid #eee;">
+            html += `<tr class="dbds-item-row" data-date="${dateKey}" data-seiban="${item['製番'] || ''}" data-supplier="${item['仕入先'] || ''}" data-suppliercd="${item['仕入先CD'] || ''}" data-ordertype="${item['手配区分'] || ''}" style="background: ${rowBg}; border-bottom: 1px solid #eee;">
                 <td style="padding: 6px 10px; font-weight: bold;">${item['製番'] || '-'}</td>
                 <td style="padding: 6px 10px;">${item['仕入先'] || '-'}</td>
                 <td style="padding: 6px 10px;">${item['品名'] || '-'}</td>
@@ -907,51 +921,66 @@ function printDbDeliverySchedule() {
     const today = new Date().toISOString().split('T')[0];
     const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
 
+    // 土田鉄工所フィルター中かどうか
+    const isTsuchidaMode = dbDsFilters.supplierCd === '116';
+    const title = isTsuchidaMode ? '土田鉄工所 発注リスト' : '納品予定表（発注DB）';
+
     let tableRows = '';
+    let printTotal = 0;
     const sortedDates = Object.keys(data.days).sort();
 
     sortedDates.forEach(dateKey => {
-        const items = data.days[dateKey];
+        // フィルター適用：土田鉄工所モードなら仕入先CD=116のみ
+        const allItems = data.days[dateKey];
+        const items = isTsuchidaMode
+            ? allItems.filter(item => String(item['仕入先CD']) === '116')
+            : allItems;
+        if (items.length === 0) return;
+
         const d = new Date(dateKey);
         const displayDate = `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}(${weekdays[d.getDay()]})`;
         const isToday = dateKey === today;
         const todayMark = isToday ? ' [TODAY]' : '';
 
+        printTotal += items.length;
+
         // 日付ヘッダー行
         tableRows += `<tr style="background: ${isToday ? '#fff3cd' : '#e9ecef'};">
-            <td colspan="7" style="padding: 8px; font-weight: bold; font-size: 1.1em; border: 1px solid #ccc;">
+            <td colspan="6" style="padding: 8px; font-weight: bold; font-size: 1.1em; border: 1px solid #ccc;">
                 ${displayDate}${todayMark} - ${items.length}件
             </td></tr>`;
 
         items.forEach(item => {
             tableRows += `<tr>
-                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['製番'] || '-'}</td>
-                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['仕入先'] || '-'}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc; font-weight: bold;">${item['製番'] || '-'}</td>
                 <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['品名'] || '-'}</td>
                 <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['仕様１'] || '-'}</td>
-                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['手配区分'] || '-'}</td>
                 <td style="padding: 4px 8px; border: 1px solid #ccc; text-align: right;">${item['発注数'] || '-'} ${item['単位'] || ''}</td>
+                <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['納期'] || '-'}</td>
                 <td style="padding: 4px 8px; border: 1px solid #ccc;">${item['発注番号'] || '-'}</td>
             </tr>`;
         });
     });
 
+    const headerColor = isTsuchidaMode ? '#343a40' : '#28a745';
+    const columns = isTsuchidaMode
+        ? `<th>製番</th><th>品名</th><th>仕様１</th><th>数量</th><th>納期</th><th>発注番号</th>`
+        : `<th>製番</th><th>品名</th><th>仕様１</th><th>数量</th><th>納期</th><th>発注番号</th>`;
+
     const printWindow = window.open('', '_blank');
-    printWindow.document.write(`<!DOCTYPE html><html><head><title>納品予定表（発注DB）</title>
+    printWindow.document.write(`<!DOCTYPE html><html><head><title>${title}</title>
         <style>
             @media print { @page { size: landscape; margin: 8mm; } body { margin: 0; } }
             body { font-family: 'Meiryo', sans-serif; font-size: 11px; }
             h2 { margin: 0 0 5px 0; }
             .info { font-size: 0.85em; color: #666; margin-bottom: 10px; }
             table { width: 100%; border-collapse: collapse; }
-            th { background: #28a745; color: white; padding: 6px 8px; border: 1px solid #ccc; text-align: left; }
+            th { background: ${headerColor}; color: white; padding: 6px 8px; border: 1px solid #ccc; text-align: left; }
         </style></head><body>
-        <h2>納品予定表（発注DB）</h2>
-        <div class="info">印刷日時: ${now} ／ 期間: ${data.start_date} ～ ${data.end_date} ／ 合計: ${data.total}件</div>
+        <h2>${title}</h2>
+        <div class="info">印刷日時: ${now} ／ 期間: ${data.start_date} ～ ${data.end_date} ／ 合計: ${printTotal}件</div>
         <table>
-            <thead><tr>
-                <th>製番</th><th>仕入先</th><th>品名</th><th>仕様１</th><th>手配区分</th><th>数量</th><th>発注番号</th>
-            </tr></thead>
+            <thead><tr>${columns}</tr></thead>
             <tbody>${tableRows}</tbody>
         </table>
         <script>window.onload = function() { window.print(); window.close(); };</script>

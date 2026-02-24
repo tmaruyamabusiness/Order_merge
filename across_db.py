@@ -1236,7 +1236,7 @@ def get_delivery_schedule_from_db(start_date=None, days=7, seibans=None):
         sql = """
             SELECT
                 発注番号, 製番, 品名, 仕様１, 発注数, 単位,
-                仕入先略称, 納期, 手配区分
+                仕入先略称, 仕入先CD, 納期, 手配区分
             FROM dbo.[V_D発注残]
             WHERE 納期 >= ? AND 納期 <= ?
         """
@@ -1257,7 +1257,7 @@ def get_delivery_schedule_from_db(start_date=None, days=7, seibans=None):
         days_dict = {}
 
         for row in rows:
-            raw_date = row[7]  # 納期
+            raw_date = row[8]  # 納期（仕入先CD追加によりインデックスシフト）
             delivery_date_display = format_value(raw_date)  # 表示用 (YY/MM/DD)
 
             # 日付キー用 (YYYY-MM-DD形式)
@@ -1276,8 +1276,9 @@ def get_delivery_schedule_from_db(start_date=None, days=7, seibans=None):
                 '発注数': format_value(row[4]),
                 '単位': format_value(row[5]),
                 '仕入先': format_value(row[6]),
+                '仕入先CD': format_value(row[7]),
                 '納期': delivery_date_display,
-                '手配区分': format_value(row[8])
+                '手配区分': format_value(row[9])
             }
             items.append(item)
 
