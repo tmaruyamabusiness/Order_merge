@@ -2385,6 +2385,8 @@
                                         🏷 ラベル
                                     </button>
                                 </div>
+                                <div id="recently-viewed-${seiban}" style="display:none; padding:5px 0 3px 0; margin-top:5px; border-top:1px dashed #e0e0e0; font-size:0.82em;" onclick="event.stopPropagation()">
+                                </div>
                             </div>
                         </div>
                         <div class="unit-list" id="units-${seiban}" style="display: none;">
@@ -2405,6 +2407,7 @@
                     `;
 
                     orderGrid.appendChild(parentCard);
+                    updateRecentlyViewedSection(seiban);
 
                     // 子要素（ユニットレベル）をユニットリストに追加
                     const unitList = parentCard.querySelector(`#units-${seiban}`);
@@ -2535,6 +2538,8 @@
                                                 🏷 ラベル
                                             </button>
                                         </div>
+                                        <div id="recently-viewed-${derivativeSeiban}" style="display:none; padding:5px 0 3px 0; margin-top:5px; border-top:1px dashed #e0e0e0; font-size:0.82em;" onclick="event.stopPropagation()">
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="unit-list" id="units-${derivativeSeiban}" style="display: none;">
@@ -2555,6 +2560,7 @@
                             `;
 
                             orderGrid.appendChild(derivativeCard);
+                            updateRecentlyViewedSection(derivativeSeiban);
 
                             // 派生のユニットを追加
                             const derivUnitList = derivativeCard.querySelector(`#units-${derivativeSeiban}`);
@@ -3050,13 +3056,60 @@
                     });
                 }
 
+                // =============================================
+                // 最近閲覧ユニット機能
+                // =============================================
+                const RV_KEY = 'recentlyViewed';
+                const RV_MAX = 8;
+
+                function recordRecentlyViewed(orderId, seiban, unit) {
+                    try {
+                        let history = JSON.parse(localStorage.getItem(RV_KEY) || '[]');
+                        history = history.filter(h => h.orderId !== orderId);
+                        history.unshift({ orderId, seiban, unit, viewedAt: Date.now() });
+                        if (history.length > RV_MAX) history = history.slice(0, RV_MAX);
+                        localStorage.setItem(RV_KEY, JSON.stringify(history));
+                        updateRecentlyViewedSection(seiban);
+                    } catch(e) {}
+                }
+
+                function updateRecentlyViewedSection(seiban) {
+                    const el = document.getElementById('recently-viewed-' + seiban);
+                    if (!el) return;
+                    try {
+                        const history = JSON.parse(localStorage.getItem(RV_KEY) || '[]');
+                        const recent = history.filter(h => h.seiban === seiban);
+                        if (recent.length === 0) { el.style.display = 'none'; return; }
+                        const links = recent.map(h => {
+                            const esc = (s) => (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+                            return `<a href="#" onclick="event.stopPropagation(); showOrderDetails(${h.orderId}); return false;"
+                                style="color:#0055cc; text-decoration:underline; margin-right:14px; white-space:nowrap;">` +
+                                esc(h.unit || '(無名)') +
+                                `<span style="color:#aaa; font-size:0.9em; margin-left:3px;">${formatTimeAgo(h.viewedAt)}</span></a>`;
+                        }).join('');
+                        el.innerHTML = '<span style="color:#888; margin-right:6px;">🕐 最近閲覧:</span>' + links;
+                        el.style.display = '';
+                    } catch(e) {}
+                }
+
+                function formatTimeAgo(ts) {
+                    const min = Math.floor((Date.now() - ts) / 60000);
+                    if (min < 1) return '今';
+                    if (min < 60) return min + '分前';
+                    const hr = Math.floor(min / 60);
+                    if (hr < 24) return hr + '時間前';
+                    return Math.floor(hr / 24) + '日前';
+                }
+
                 // showOrderDetails関数内の詳細リスト部分を修正
                 async function showOrderDetails(orderId) {
                     currentOrderId = orderId;
                     try {
                         const response = await fetch(`/api/order/${orderId}`);
                         const data = await response.json();
-                        
+
+                        recordRecentlyViewed(orderId, data.order.seiban, data.order.unit);
+
                         document.getElementById('modalTitle').textContent = `${data.order.seiban} - ${data.order.unit}`;
                         
                         let detailsHtml = `
